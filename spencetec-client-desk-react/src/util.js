@@ -1,0 +1,12 @@
+export const STAGES = [["enquiry","Enquiry"],["design","Design"],["build","Build"],["review","Review"],["live","Live"],["maintenance","Maintenance"]];
+export const CONTENT = [["none","Not received"],["partial","Partial"],["full","Received"]];
+export const today = () => new Date().toISOString().slice(0, 10);
+export const kes = (n) => "KES " + Math.round(n || 0).toLocaleString("en-KE");
+export const stageName = (k) => (STAGES.find((s) => s[0] === k) || [, k])[1];
+export const uid = () => Math.random().toString(36).slice(2, 9);
+export const tasksOf = (c) => c.tasks || [];
+export const paysOf = (c) => c.payments || [];
+export const openTasks = (c) => tasksOf(c).filter((t) => !t.done);
+export const overdue = (c) => openTasks(c).filter((t) => t.due && t.due < today());
+export const owed = (c) => paysOf(c).filter((p) => p.status !== "paid").reduce((a, p) => a + (+p.amount || 0), 0);
+export const paid = (c) => paysOf(c).filter((p) => p.status === "paid").reduce((a, p) => a + (+p.amount || 0), 0);

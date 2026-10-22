@@ -1,0 +1,4 @@
+# copy to .dev.vars for local testing
+AUTH_SECRET=local-test-secret-change-me
+DEV_SHOW_CODE=1
+OWNER_EMAIL=you@example.com

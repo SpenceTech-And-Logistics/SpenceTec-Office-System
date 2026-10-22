@@ -1,0 +1,17 @@
+{
+  "name": "spencetec-client-desk",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build && wrangler dev",
+    "deploy": "vite build && wrangler deploy",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote",
+    "seed:local": "wrangler d1 execute DB --local --file=seed.sql",
+    "seed:remote": "wrangler d1 execute DB --remote --file=seed.sql"
+  },
+  "dependencies": { "react": "^19.1.0", "react-dom": "^19.1.0" },
+  "devDependencies": { "@vitejs/plugin-react": "^5.0.0", "vite": "^7.0.0", "wrangler": "^4.0.0" }
+}
