@@ -1,12 +1,18 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 
-// Shared client data for every page, with optimistic updates so ticks and moves feel instant.
+// Shared data for every page, with optimistic updates so ticks and moves feel instant.
 const Ctx = createContext(null);
 export const useDesk = () => useContext(Ctx);
 
 export function DeskProvider({ me, onSignOut, children }) {
+  const isOwner = me.role === "owner";
+  const isStaff = isOwner || me.role === "secretary";
+  const isSales = me.role === "sales";
   const [clients, setClients] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [settings, setSettings] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [toasts, setToasts] = useState([]);
@@ -20,21 +26,27 @@ export function DeskProvider({ me, onSignOut, children }) {
 
   const refresh = useCallback(async () => {
     try {
-      const list = await api.clients();
-      if (!busy.current) setClients(list);
+      const [list, inv] = await Promise.all([api.clients(), isStaff ? api.invoices() : []]);
+      if (!busy.current) { setClients(list); setInvoices(inv); }
       setLoaded(true); setError("");
     } catch (e) {
       if (e.status === 401) onSignOut(); else { setError(e.message); setLoaded(true); }
     }
-  }, [onSignOut]);
+  }, [onSignOut, isStaff]);
+
+  const loadMeta = useCallback(() => {
+    if (!isStaff) return;
+    api.users().then(setUsers).catch(() => {});
+    api.settings().then(setSettings).catch(() => {});
+  }, [isStaff]);
 
   useEffect(() => {
-    refresh();
+    refresh(); loadMeta();
     const t = setInterval(() => document.visibilityState === "visible" && refresh(), 20000);
     const v = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", v);
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", v); };
-  }, [refresh]);
+  }, [refresh, loadMeta]);
 
   // patch(id, fields | (client) => fields)
   const patch = useCallback(async (id, fields, okText) => {
@@ -56,18 +68,32 @@ export function DeskProvider({ me, onSignOut, children }) {
     }
   }, [refresh, toast]);
 
-  const create = useCallback(async (id, data) => {
-    await api.saveClient(id, data);
-    await refresh();
-  }, [refresh]);
-
+  const create = useCallback(async (id, data) => { await api.saveClient(id, data); await refresh(); }, [refresh]);
   const remove = useCallback(async (id) => {
     await api.deleteClient(id);
     setClients((cs) => cs.filter((c) => c.id !== id));
     refresh();
   }, [refresh]);
 
-  const value = { me, isOwner: me.role === "owner", clients, loaded, error, refresh, patch, create, remove, toast, onSignOut };
+  const patchInvoice = useCallback(async (id, fields, okText) => {
+    setInvoices((xs) => xs.map((x) => (x.id === id ? { ...x, ...fields } : x)));
+    busy.current++;
+    try { await api.patchInvoice(id, fields); if (okText) toast(okText, "ok"); }
+    catch (e) { toast(e.message || "Couldn't save", "bad"); throw e; }
+    finally { busy.current--; refresh(); }
+  }, [refresh, toast]);
+
+  const person = useCallback((email) => {
+    if (!email) return "";
+    if (email === me.email) return "You";
+    const u = users.find((x) => x.email === email);
+    return (u && u.name && u.name !== "Owner" ? u.name : email.split("@")[0]);
+  }, [users, me.email]);
+
+  const value = {
+    me, isOwner, isStaff, isSales, clients, invoices, users, settings, loaded, error,
+    refresh, loadMeta, patch, create, remove, patchInvoice, setSettings, toast, onSignOut, person,
+  };
   return (
     <Ctx.Provider value={value}>
       {children}
