@@ -4,6 +4,17 @@ React app served by one Cloudflare Worker. Data lives in a **D1 database** (SQLi
 
 Tables: `users`, `login_codes`, `sessions`, `clients` (see `migrations/0001_init.sql`).
 
+## Pages (v3 redesign)
+- **Overview** (`/`): summary tiles, tasks that are overdue or due this week, clients you're still waiting on for content, pipeline, money owed, recently changed.
+- **Clients** (`/clients`): board or list. Drag a card to another column to change its stage. In the list, change the stage from the dropdown. The stage chips filter the list (`/clients?stage=live`).
+- **Client page** (`/clients/<id>`): click a stage to move the client. Also on this page: tasks, payments, details (click Edit), content status, notes, and quick buttons to visit the site, open the repo, email or call.
+- **Tasks** (`/tasks`): every task across all clients, grouped Overdue / Today / Next 7 days / Later / No date. Add a task for any client from here.
+- **Payments** (`/payments`): all invoices with Invoiced / Received / Outstanding totals. Click "Pending" to mark a payment as paid.
+- **Team** (`/team`, owner only).
+
+Shortcuts: `/` to find a client, `N` for a new client, `Esc` to close. On phones, a bottom tab bar replaces the sidebar.
+No backend changes: the Worker API and database are the same as v2.
+
 ## 1. Install (Ubuntu)
 ```bash
 sudo apt update && sudo apt install -y nodejs npm     # Node 20+ recommended (use nvm if older)
@@ -16,7 +27,7 @@ npx wrangler login
 ```bash
 npx wrangler d1 create spencetec-client-desk
 ```
-Copy the `database_id` it prints into `wrangler.jsonc`.
+Copy the `database_id` it prints into `wrangler.jsonc` (already set to `c7f9d54f-87b4-4917-8d28-d965659956f3`). Keep a single binding named `DB`.
 
 ```bash
 npm run db:remote       # creates the tables

@@ -1,179 +1,206 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
 import Login from "./Login.jsx";
-import Team from "./Team.jsx";
-import Drawer from "./Drawer.jsx";
-import { STAGES, today, kes, stageName, uid, openTasks, overdue, owed, paid } from "./util.js";
+import { DeskProvider, useDesk } from "./desk.jsx";
+import { Link, navigate, useLocation } from "./router.jsx";
+import { Icon, Stage } from "./ui.jsx";
+import { STAGES, slug, overdue } from "./util.js";
+import Overview from "./pages/Overview.jsx";
+import Clients from "./pages/Clients.jsx";
+import ClientPage from "./pages/ClientPage.jsx";
+import Tasks from "./pages/Tasks.jsx";
+import Payments from "./pages/Payments.jsx";
+import Team from "./pages/Team.jsx";
 
 export default function App() {
   const [me, setMe] = useState(undefined); // undefined = checking, null = signed out
   useEffect(() => { api.me().then((r) => setMe(r.user)).catch(() => setMe(null)); }, []);
-  if (me === undefined) return <div className="wrap"><div className="empty"><b>Loading…</b></div></div>;
+  if (me === undefined) return <div className="boot"><span className="logo">S</span></div>;
   if (!me) return <Login onDone={setMe} />;
-  return <Desk me={me} onSignOut={() => setMe(null)} />;
+  return <DeskProvider me={me} onSignOut={() => setMe(null)}><Shell /></DeskProvider>;
 }
 
-function Desk({ me, onSignOut }) {
-  const isOwner = me.role === "owner";
-  const [clients, setClients] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState("");
-  const [q, setQ] = useState("");
-  const [view, setView] = useState(() => { try { return localStorage.getItem("stc-view") || "board"; } catch { return "board"; } });
-  const [sel, setSel] = useState(null); // id of open client
-  const [draft, setDraft] = useState(null);
-  const [team, setTeam] = useState(false);
+const NAV = [
+  ["/", "Overview", "home"],
+  ["/clients", "Clients", "clients"],
+  ["/tasks", "Tasks", "tasks"],
+  ["/payments", "Payments", "money"],
+];
 
-  const refresh = useCallback(async () => {
-    try { setClients(await api.clients()); setLoaded(true); setError(""); }
-    catch (e) { if (e.status === 401) onSignOut(); else { setError(e.message); setLoaded(true); } }
-  }, [onSignOut]);
-  useEffect(() => { refresh(); const t = setInterval(refresh, 20000); return () => clearInterval(t); }, [refresh]);
-  useEffect(() => { try { localStorage.setItem("stc-view", view); } catch {} }, [view]);
-  useEffect(() => { const k = (e) => e.key === "Escape" && (setSel(null), setDraft(null), setTeam(false)); window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, []);
+function Shell() {
+  const { me, isOwner, clients, onSignOut } = useDesk();
+  const { path } = useLocation();
+  const [adding, setAdding] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const late = clients.reduce((a, c) => a + overdue(c).length, 0);
 
-  const list = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    return clients.filter((c) => !s || [c.name, c.type, c.domain, c.repo, c.hosting, c.email].join(" ").toLowerCase().includes(s));
-  }, [clients, q]);
+  const nav = isOwner ? [...NAV, ["/team", "Team", "team"]] : NAV;
+  const active = (to) => (to === "/" ? path === "/" : path === to || path.startsWith(to + "/"));
 
-  const stats = useMemo(() => {
-    const od = clients.reduce((a, c) => a + overdue(c).length, 0);
-    const ow = clients.reduce((a, c) => a + owed(c), 0);
-    return [
-      [clients.length, "Clients"],
-      [clients.filter((c) => ["live", "maintenance"].includes(c.stage)).length, "Live or maintained"],
-      [clients.filter((c) => ["design", "build", "review"].includes(c.stage)).length, "In progress"],
-      [clients.reduce((a, c) => a + openTasks(c).length, 0), "Open tasks"],
-      [od, "Overdue tasks", od > 0],
-      [kes(ow), "Outstanding", ow > 0],
-      [kes(clients.reduce((a, c) => a + paid(c), 0)), "Paid to date"],
-    ];
-  }, [clients]);
-
-  const upnext = useMemo(() => {
-    const all = [];
-    clients.forEach((c) => openTasks(c).forEach((t) => all.push({ c, t })));
-    return all.sort((a, b) => (a.t.due || "9999").localeCompare(b.t.due || "9999")).slice(0, 8);
-  }, [clients]);
-
-  const move = async (c, d) => {
-    const i = STAGES.findIndex((s) => s[0] === c.stage) + d;
-    if (STAGES[i]) { await api.patchClient(c.id, { stage: STAGES[i][0] }).catch(() => {}); refresh(); }
-  };
-
-  const openClient = sel ? clients.find((c) => c.id === sel) : null;
-  const current = draft || openClient;
-  const close = () => { setSel(null); setDraft(null); };
+  useEffect(() => {
+    const k = (e) => {
+      const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+      if (e.key === "Escape") { setAdding(false); setMenu(false); }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "/") { e.preventDefault(); document.getElementById("qsearch")?.focus(); }
+      if (e.key === "n") { e.preventDefault(); setAdding(true); }
+    };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, []);
+  useEffect(() => setMenu(false), [path]);
 
   async function signOut() { await api.logout().catch(() => {}); onSignOut(); }
 
+  let page;
+  const m = path.match(/^\/clients\/([^/]+)$/);
+  if (path === "/") page = <Overview />;
+  else if (path === "/clients") page = <Clients onAdd={() => setAdding(true)} />;
+  else if (m) page = <ClientPage id={decodeURIComponent(m[1])} />;
+  else if (path === "/tasks") page = <Tasks />;
+  else if (path === "/payments") page = <Payments />;
+  else if (path === "/team") page = <Team />;
+  else page = <div className="empty"><b>Page not found</b><Link to="/">Go to Overview</Link></div>;
+
+  const initial = (me.name && me.name !== "Owner" ? me.name : me.email)[0].toUpperCase();
+
   return (
-    <div className="wrap">
-      <header>
-        <div className="brand">
-          <h1>SpenceTec Client Desk</h1>
-          <p>SpenceTec and Logistics Limited · private client pipeline</p>
+    <div className="app">
+      <aside className="side">
+        <Link to="/" className="brand"><span className="logo">S</span><span><b>Client Desk</b><small>SpenceTec</small></span></Link>
+        <button className="btn primary block" onClick={() => setAdding(true)}><Icon name="plus" size={16} />New client</button>
+        <nav aria-label="Main">
+          {nav.map(([to, n, ic]) => (
+            <Link key={to} to={to} className="navlink" aria-current={active(to) ? "page" : undefined}>
+              <Icon name={ic} />{n}
+              {to === "/tasks" && late > 0 && <em className="badge" title={`${late} overdue`}>{late}</em>}
+            </Link>
+          ))}
+        </nav>
+        <div className="me">
+          <span className="avatar">{initial}</span>
+          <span className="who"><b>{me.name && me.name !== "Owner" ? me.name : me.email.split("@")[0]}</b><small>{me.role === "owner" ? "Owner" : "Team member"}</small></span>
+          <button className="icon-btn" title="Sign out" aria-label="Sign out" onClick={signOut}><Icon name="out" /></button>
         </div>
-        <div className="tools">
-          <input className="search" type="search" placeholder="Search clients" aria-label="Search clients" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="seg" role="group" aria-label="View">
-            <button aria-pressed={view === "board"} onClick={() => setView("board")}>Board</button>
-            <button aria-pressed={view === "list"} onClick={() => setView("list")}>List</button>
+      </aside>
+
+      <div className="main">
+        <header className="top">
+          <Link to="/" className="brand mobile-only"><span className="logo">S</span></Link>
+          <QuickSearch />
+          <button className="btn primary add-top" onClick={() => setAdding(true)} aria-label="New client"><Icon name="plus" size={16} /><span>New client</span></button>
+          <div className="menuwrap mobile-only">
+            <button className="avatar as-btn" aria-label="Account menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>{initial}</button>
+            {menu && (
+              <div className="menu" role="menu">
+                <span className="menu-who">{me.email}</span>
+                {isOwner && <Link to="/team" role="menuitem"><Icon name="team" />Team access</Link>}
+                <button role="menuitem" onClick={signOut}><Icon name="out" />Sign out</button>
+              </div>
+            )}
           </div>
-          <button className="btn primary" onClick={() => { const id = "c-" + uid(); setDraft({ id, name: "", stage: "enquiry", content: "none", tasks: [], payments: [] }); setSel(id); }}>Add client</button>
-          {isOwner && <button className="btn" onClick={() => setTeam(true)}>Team</button>}
-          <span className="who">{me.email}</span>
-          <button className="btn sm" onClick={signOut}>Sign out</button>
-        </div>
-      </header>
-
-      <section className="stats" aria-label="Summary">
-        {stats.map(([v, l, alert]) => <div key={l} className={"stat" + (alert ? " alert" : "")}><b>{v}</b><span>{l}</span></div>)}
-      </section>
-
-      <div className="grid">
-        <main>
-          {error ? <div className="empty"><b>Can't reach the client database</b>{error}. Check your connection and refresh.</div>
-          : !loaded ? <div className="empty"><b>Loading clients…</b>One moment.</div>
-          : !clients.length ? <div className="empty"><b>No clients yet</b>Add your first client, or run the seed step in the README.</div>
-          : !list.length ? <div className="empty"><b>No match</b>Nothing matches that search.</div>
-          : view === "board" ? (
-            <div className="board">
-              {STAGES.map(([k, n]) => {
-                const cs = list.filter((c) => c.stage === k);
-                return (
-                  <section className="col" key={k} style={{ "--c": `var(--s-${k})` }}>
-                    <h3><span><i />{n}</span><em>{cs.length}</em></h3>
-                    {cs.map((c) => <Card key={c.id} c={c} onOpen={() => setSel(c.id)} onMove={move} />)}
-                  </section>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="tablewrap"><table>
-              <thead><tr><th>Client</th><th>Stage</th><th>Domain</th><th>Hosting</th><th>Tasks</th><th>Outstanding</th></tr></thead>
-              <tbody>{list.map((c) => (
-                <tr key={c.id} onClick={() => setSel(c.id)}>
-                  <td><b>{c.name}</b><br /><span className="note">{c.type}</span></td>
-                  <td><span className="pill" style={{ color: `var(--s-${c.stage})` }}>{stageName(c.stage)}</span></td>
-                  <td>{c.domain || "—"}</td><td>{c.hosting || "—"}</td>
-                  <td>{openTasks(c).length}{overdue(c).length > 0 && <> <span className="pill bad">{overdue(c).length} late</span></>}</td>
-                  <td>{owed(c) ? kes(owed(c)) : "—"}</td>
-                </tr>))}</tbody>
-            </table></div>
-          )}
-        </main>
-        <aside className="panel" aria-label="Next up">
-          <h2>Next up</h2>
-          {upnext.length ? upnext.map(({ c, t }) => (
-            <button className="up" key={c.id + t.id} onClick={() => setSel(c.id)}>
-              <span>{c.name}</span>{t.text}
-              <span>{t.due ? (t.due < today() ? <b style={{ color: "var(--bad)" }}>Overdue · {t.due}</b> : "Due " + t.due) : "No date"}</span>
-            </button>
-          )) : <span className="note">{loaded ? "No open tasks." : "Loading…"}</span>}
-        </aside>
+        </header>
+        <main className="page" key={path}>{page}</main>
+        <footer className="foot">Built by SpenceTec and Logistics Limited · amounts in KES<span className="hint"> · press <kbd>/</kbd> to search, <kbd>N</kbd> for a new client</span></footer>
       </div>
-      <p className="foot">Built by SpenceTec and Logistics Limited · amounts in KES</p>
 
-      {current && (
-        <Drawer
-          key={current.id}
-          client={current}
-          isNew={!!draft}
-          isOwner={isOwner}
-          onClose={close}
-          onSave={async (data) => {
-            await api.saveClient(current.id, draft ? data : { ...openClient, ...data });
-            if (draft) { setDraft(null); }
-            await refresh();
-          }}
-          onPatch={async (d) => { await api.patchClient(current.id, d); await refresh(); }}
-          onDelete={async () => { await api.deleteClient(current.id); close(); await refresh(); }}
-        />
-      )}
-      {team && <Team me={me} onClose={() => setTeam(false)} />}
+      <nav className="tabbar" aria-label="Main">
+        {NAV.map(([to, n, ic]) => (
+          <Link key={to} to={to} aria-current={active(to) ? "page" : undefined}>
+            <Icon name={ic} size={20} /><span>{n}</span>
+            {to === "/tasks" && late > 0 && <em className="badge">{late}</em>}
+          </Link>
+        ))}
+      </nav>
+
+      {adding && <NewClient onClose={() => setAdding(false)} />}
     </div>
   );
 }
 
-function Card({ c, onOpen, onMove }) {
-  const i = STAGES.findIndex((s) => s[0] === c.stage);
-  const od = overdue(c).length, ot = openTasks(c).length, ow = owed(c), cs = c.content || "none";
+function QuickSearch() {
+  const { clients } = useDesk();
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [i, setI] = useState(0);
+  const box = useRef(null);
+  const hits = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return [];
+    return clients.filter((c) => [c.name, c.type, c.domain, c.repo, c.hosting, c.email, c.phone].join(" ").toLowerCase().includes(s)).slice(0, 7);
+  }, [clients, q]);
+  useEffect(() => setI(0), [q]);
+  useEffect(() => {
+    const f = (e) => !box.current?.contains(e.target) && setOpen(false);
+    document.addEventListener("pointerdown", f);
+    return () => document.removeEventListener("pointerdown", f);
+  }, []);
+  const go = (c) => { setQ(""); setOpen(false); document.activeElement?.blur(); navigate(`/clients/${c.id}`); };
   return (
-    <div className="card" style={{ "--c": `var(--s-${c.stage})` }} role="button" tabIndex={0}
-      onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
-      <strong>{c.name}</strong>
-      <small>{c.type}{c.domain ? " · " + c.domain : ""}</small>
-      <div className="row">
-        {od ? <span className="pill bad">{od} overdue</span> : ot ? <span className="pill">{ot} open</span> : null}
-        {ow ? <span className="pill warn">{kes(ow)} due</span> : null}
-        {cs !== "full" && <span className={"pill" + (cs === "partial" ? " warn" : "")}>Content: {cs === "partial" ? "partial" : "awaited"}</span>}
-        <span className="mv">
-          <button disabled={i <= 0} aria-label="Move back" onClick={(e) => { e.stopPropagation(); onMove(c, -1); }}>←</button>
-          <button disabled={i >= STAGES.length - 1} aria-label="Move forward" onClick={(e) => { e.stopPropagation(); onMove(c, 1); }}>→</button>
-        </span>
-      </div>
+    <div className="qs" ref={box}>
+      <Icon name="search" size={16} />
+      <input id="qsearch" type="search" placeholder="Find a client…" aria-label="Find a client" autoComplete="off"
+        value={q} onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") { e.preventDefault(); setI((x) => Math.min(x + 1, hits.length - 1)); }
+          if (e.key === "ArrowUp") { e.preventDefault(); setI((x) => Math.max(x - 1, 0)); }
+          if (e.key === "Enter" && hits[i]) go(hits[i]);
+          if (e.key === "Escape") { setQ(""); e.currentTarget.blur(); }
+        }} />
+      <kbd className="qs-k">/</kbd>
+      {open && q.trim() && (
+        <div className="qs-list" role="listbox">
+          {hits.length ? hits.map((c, n) => (
+            <button key={c.id} role="option" aria-selected={n === i} className={n === i ? "on" : ""} onMouseEnter={() => setI(n)} onClick={() => go(c)}>
+              <span><b>{c.name}</b><small>{[c.type, c.domain].filter(Boolean).join(" · ")}</small></span>
+              <Stage k={c.stage} />
+            </button>
+          )) : <span className="qs-none">No client matches “{q}”.</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewClient({ onClose }) {
+  const { clients, create, toast } = useDesk();
+  const [f, setF] = useState({ name: "", type: "", stage: "enquiry", domain: "", email: "", phone: "" });
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  async function submit(e) {
+    e.preventDefault();
+    const name = f.name.trim();
+    if (!name) { setErr("Give the client a name."); return; }
+    let id = slug(name);
+    while (clients.some((c) => c.id === id)) id = slug(name) + "-" + Math.random().toString(36).slice(2, 5);
+    setBusy(true);
+    try {
+      await create(id, { ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v.trim()])), content: "none", hosting: "", repo: "", firebase: "", notes: "", tasks: [], payments: [] });
+      toast("Client added", "ok");
+      onClose();
+      navigate(`/clients/${id}`);
+    } catch (x) { setErr(x.message); setBusy(false); }
+  }
+  return (
+    <div className="scrim" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="modal" role="dialog" aria-label="New client" onSubmit={submit}>
+        <div className="mh"><h2>New client</h2><button type="button" className="icon-btn" aria-label="Close" onClick={onClose}><Icon name="x" /></button></div>
+        <div className="fields">
+          <label className="full">Client name<input autoFocus value={f.name} onChange={set("name")} placeholder="e.g. Lilian Wanjiku Manegene" /></label>
+          <label>Project type<input value={f.type} onChange={set("type")} placeholder="Portfolio SPA" /></label>
+          <label>Stage<select value={f.stage} onChange={set("stage")}>{STAGES.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
+          <label>Email<input type="email" value={f.email} onChange={set("email")} /></label>
+          <label>Phone<input type="tel" value={f.phone} onChange={set("phone")} placeholder="+254…" /></label>
+          <label className="full">Domain<input value={f.domain} onChange={set("domain")} placeholder="name.com" /></label>
+        </div>
+        <p className="small">You can add hosting, repo, tasks and payments on the client's page.</p>
+        <div className="err" role="alert">{err}</div>
+        <div className="mf">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary" disabled={busy}>{busy ? "Adding…" : "Add client"}</button>
+        </div>
+      </form>
     </div>
   );
 }

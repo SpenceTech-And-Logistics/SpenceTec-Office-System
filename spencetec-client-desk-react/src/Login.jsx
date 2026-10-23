@@ -22,8 +22,9 @@ export default function Login({ onDone }) {
   }
   return (
     <div className="login">
-      <div className="brand">
-        <h1>SpenceTec Client Desk</h1>
+      <div className="login-brand">
+        <span className="logo lg">S</span>
+        <h1>Client Desk</h1>
         <p>SpenceTec and Logistics Limited · team sign-in</p>
       </div>
       <div className="panel">
