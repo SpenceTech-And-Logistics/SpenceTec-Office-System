@@ -18,6 +18,6 @@
   ],
   "vars": {
     "OWNER_EMAIL": "davidspec580@gmail.com",
-    "MAIL_FROM": "SpenceTec Client Desk <desk@YOUR-VERIFIED-DOMAIN.com>",
+    "MAIL_FROM": "SpenceTec Client Desk <desk@spencetec.com>",
   },
 }
