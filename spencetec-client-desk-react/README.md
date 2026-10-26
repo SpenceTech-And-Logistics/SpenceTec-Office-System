@@ -13,6 +13,9 @@ Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `set
 
 Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
 
+## Sign-in timeouts (v4.1)
+Secretaries and sales reps are signed out after **30 minutes without activity** and after **8 hours** at most, whichever comes first. They get a two-minute "Are you still there?" warning first, and the sign-in screen says why they were signed out. The owner can change both limits in **Settings → Sign-in security**; the owner's own sign-in isn't affected. The Worker enforces this (background refreshes don't count as activity), so closing the tab doesn't keep a session alive.
+
 ## Invoices (v4)
 Billing → New invoice (or "New invoice" on a client's page). Numbers run automatically (prefix set in Settings, default `SPT-0001`). Lines, discount, optional VAT, notes. Mark as sent, record payments (M-Pesa, bank, cash, with reference), and the invoice shows Part paid / Paid / Overdue by itself. "Print or save PDF" prints just the invoice. Set your company details, KRA PIN and how-to-pay text under **Settings** (owner).
 

@@ -46,14 +46,41 @@ async function ensureOwner(env, email) {
 const getUser = (env, email) =>
   env.DB.prepare("SELECT email,name,role FROM users WHERE email=?").bind(email).first();
 
+// Returns { user, session } when signed in, { expired: "reason" } when a timeout ended it, or null.
+// Owners keep the long session; secretaries and sales reps are signed out after inactivity or a maximum time.
 async function sessionUser(request, env) {
   const t = cookie(request, "sid");
   if (!t) return null;
-  const row = await env.DB.prepare("SELECT email,expires_at FROM sessions WHERE token_hash=?")
-    .bind(await sha256(t)).first();
+  const hash = await sha256(t);
+  const row = await env.DB.prepare("SELECT email,expires_at,created_at,last_seen FROM sessions WHERE token_hash=?").bind(hash).first();
   if (!row || row.expires_at < now()) return null;
-  return getUser(env, row.email); // null if the owner has since removed them
+  const user = await getUser(env, row.email); // null if the owner has since removed them
+  if (!user) return null;
+  if (user.role === "owner") return { user, session: { limited: false } };
+
+  const { results } = await env.DB.prepare("SELECT key,value FROM settings WHERE key IN ('idleMinutes','maxHours')").all();
+  const cfg = Object.fromEntries(results.map((r) => [r.key, +r.value]));
+  const idleMinutes = clamp(cfg.idleMinutes || 30, 5, 480);
+  const maxHours = clamp(cfg.maxHours || 8, 1, 72);
+  const created = row.created_at || now();
+  const seen = row.last_seen || created;
+  const t0 = now();
+  let expired = "";
+  if (t0 - seen > idleMinutes * 60) expired = `You were signed out after ${idleMinutes} minutes without activity.`;
+  else if (t0 - created > maxHours * 3600) expired = `You were signed out because sign-ins last ${maxHours} hour${maxHours === 1 ? "" : "s"}. Sign in again to continue.`;
+  if (expired) {
+    await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?").bind(hash).run();
+    return { expired };
+  }
+  // Background refreshes (x-poll) don't count as activity. Write at most every 30 s.
+  let lastSeen = seen;
+  if (request.headers.get("x-poll") !== "1" && t0 - seen >= 30) {
+    await env.DB.prepare("UPDATE sessions SET last_seen=? WHERE token_hash=?").bind(t0, hash).run();
+    lastSeen = t0;
+  }
+  return { user, session: { limited: true, idleMinutes, maxHours, lastSeen, endsAt: created + maxHours * 3600 } };
 }
+const clamp = (n, a, b) => Math.min(b, Math.max(a, Math.round(n)));
 
 async function sendCode(env, email, code) {
   if (env.DEV_SHOW_CODE === "1") console.log(`[DEV] login code for ${email}: ${code}`);
@@ -129,8 +156,8 @@ export default {
         const token = randomToken();
         await env.DB.batch([
           env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()),
-          env.DB.prepare("INSERT INTO sessions (token_hash,email,expires_at) VALUES (?,?,?)")
-            .bind(await sha256(token), email, now() + SESSION_DAYS * 86400),
+          env.DB.prepare("INSERT INTO sessions (token_hash,email,expires_at,created_at,last_seen) VALUES (?,?,?,?,?)")
+            .bind(await sha256(token), email, now() + SESSION_DAYS * 86400, now(), now()),
         ]);
         return json({ user }, 200, {
           "Set-Cookie": `sid=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`,
@@ -145,9 +172,15 @@ export default {
 
 
       /* ---------- everything below needs a signed-in team member ---------- */
-      const me = await sessionUser(request, env);
-      if (path === "/api/me" && method === "GET") return me ? json({ user: me }) : fail(401, "Not signed in");
+      const auth = await sessionUser(request, env);
+      if (auth?.expired) {
+        return json({ error: auth.expired, expired: true }, 401, { "Set-Cookie": "sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0" });
+      }
+      const me = auth?.user;
       if (!me) return fail(401, "Not signed in");
+      if (path === "/api/me" && method === "GET") return json({ user: me, session: auth.session });
+      // Activity heartbeat from the page (mouse, keys, scrolling). sessionUser already recorded it.
+      if (path === "/api/ping" && method === "POST") return json({ ok: true, session: auth.session });
       const isOwner = me.role === "owner";
       const isStaff = isOwner || me.role === "secretary";
       const isSales = me.role === "sales";
@@ -407,7 +440,7 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const DOC_TYPES = [...IMAGE_TYPES, "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
 const MAX_FILE = 1900000;
 const MAX_PHOTOS = 12;
-const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "vatRate", "payInstructions", "footer"];
+const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "vatRate", "payInstructions", "footer", "idleMinutes", "maxHours"];
 
 const ownsClient = (c, email) => c.rep === email || c.createdBy === email;
 const salesView = (c) => Object.fromEntries(Object.entries(c).filter(([k]) => SALES_VIEW.includes(k)));

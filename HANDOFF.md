@@ -58,3 +58,9 @@ In a local Worker run: unauthenticated 401, stranger gets no code, wrong code re
 - New tables: invoices, files (BLOBs in D1), settings. Files capped at 1.9 MB.
 - Tested locally (wrangler dev + local D1) with all three roles: 20 permission checks pass; migration tested on a v3 database with a member user.
 - To deploy: `npm run db:remote` then `npm run deploy`.
+
+## v4.1: sign-in timeouts (26 Oct 2026)
+- Secretaries and sales reps: signed out after 30 min inactivity or 8 h maximum (owner can change in Settings). Owner exempt.
+- Migration `0003_session_timeouts.sql` adds `created_at` and `last_seen` to sessions plus the two settings.
+- Worker enforces it; requests with `x-poll: 1` (20-second refresh) don't count as activity; the page pings on real activity (mouse, keys, scroll) at most once a minute and shares activity across tabs.
+- Tested: 13 timeout checks (server idle, max length, polling, owner exempt, warning, auto sign-out) + the 20 v4 checks.

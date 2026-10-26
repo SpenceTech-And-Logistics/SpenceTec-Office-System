@@ -477,3 +477,10 @@ label.check .rate{width:64px;min-height:32px;padding:4px 8px}
   .inv-table th:nth-child(3),.inv-table td:nth-child(3),.inv-table th:nth-child(4),.inv-table td:nth-child(4),.inv-table th:nth-child(5),.inv-table td:nth-child(5){display:none}
   .inv-table th,.inv-table td{padding:10px 8px}
 }
+
+/* v4.1 sign-in timeout */
+.notice{background:var(--warn-bg);color:var(--warn);border-radius:12px;padding:12px 14px;font-weight:600;font-size:13.5px}
+.session-bar{position:fixed;top:0;left:0;right:0;z-index:35;background:var(--warn-bg);color:var(--warn);font-weight:600;font-size:13px;text-align:center;padding:8px 16px;border-bottom:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
+.modal.idle{max-width:420px}
+.modal.idle p{margin:0;color:var(--muted)}
+.modal.idle b{color:var(--fg);font-variant-numeric:tabular-nums}

@@ -44,6 +44,16 @@ export default function Settings() {
           <label>Footer line<input value={f.footer || ""} onChange={set("footer")} placeholder="Thank you for your business." /></label>
           <button className="btn primary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button>
         </section>
+        <section className="card-p">
+          <div className="ch"><h2>Sign-in security</h2></div>
+          <p className="small">For secretaries and sales reps. Your own owner sign-in isn't affected.</p>
+          <div className="fields">
+            <label>Sign out after inactivity (minutes)<input type="number" min="5" max="480" value={f.idleMinutes ?? 30} onChange={set("idleMinutes")} /></label>
+            <label>Longest sign-in (hours)<input type="number" min="1" max="72" value={f.maxHours ?? 8} onChange={set("maxHours")} /></label>
+          </div>
+          <p className="small">People get a two-minute warning before an inactivity sign-out. Changes apply on their next click.</p>
+          <button className="btn primary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button>
+        </section>
       </form>
     </>
   );

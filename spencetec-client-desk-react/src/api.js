@@ -1,23 +1,26 @@
-async function req(method, path, body, raw) {
+async function req(method, path, body, raw, poll) {
+  const headers = raw ? { "content-type": raw.type || "application/octet-stream" } : body ? { "content-type": "application/json" } : {};
+  if (poll) headers["x-poll"] = "1"; // background refresh: doesn't keep a sign-in alive
   const r = await fetch(path, {
     method,
-    headers: raw ? { "content-type": raw.type || "application/octet-stream" } : body ? { "content-type": "application/json" } : {},
+    headers,
     body: raw ? raw : body ? JSON.stringify(body) : undefined,
     credentials: "same-origin",
   });
   let j = null;
   try { j = await r.json(); } catch {}
-  if (!r.ok) { const e = new Error(j?.error || "Request failed"); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error(j?.error || "Request failed"); e.status = r.status; e.expired = !!j?.expired; throw e; }
   return j;
 }
 const e = encodeURIComponent;
 export const api = {
   me: () => req("GET", "/api/me"),
+  ping: () => req("POST", "/api/ping"),
   requestCode: (email) => req("POST", "/api/auth/request", { email }),
   verify: (email, code) => req("POST", "/api/auth/verify", { email, code }),
   logout: () => req("POST", "/api/auth/logout"),
 
-  clients: () => req("GET", "/api/clients"),
+  clients: (poll) => req("GET", "/api/clients", null, null, poll),
   saveClient: (id, data) => req("PUT", `/api/clients/${e(id)}`, data),
   patchClient: (id, data) => req("PATCH", `/api/clients/${e(id)}`, data),
   deleteClient: (id) => req("DELETE", `/api/clients/${e(id)}`),
@@ -26,7 +29,7 @@ export const api = {
   upload: (id, kind, file) => req("POST", `/api/clients/${e(id)}/files?kind=${kind}&name=${e(file.name)}`, null, file),
   deleteFile: (fid) => req("DELETE", `/api/files/${e(fid)}`),
 
-  invoices: () => req("GET", "/api/invoices"),
+  invoices: (poll) => req("GET", "/api/invoices", null, null, poll),
   createInvoice: (data) => req("POST", "/api/invoices", data),
   patchInvoice: (id, data) => req("PATCH", `/api/invoices/${e(id)}`, data),
   deleteInvoice: (id) => req("DELETE", `/api/invoices/${e(id)}`),

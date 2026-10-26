@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
 import Login from "./Login.jsx";
 import { DeskProvider, useDesk } from "./desk.jsx";
@@ -19,10 +19,16 @@ import Team from "./pages/Team.jsx";
 
 export default function App() {
   const [me, setMe] = useState(undefined); // undefined = checking, null = signed out
-  useEffect(() => { api.me().then((r) => setMe(r.user)).catch(() => setMe(null)); }, []);
+  const [session, setSession] = useState(null);
+  const [notice, setNotice] = useState("");
+  const load = () => api.me().then((r) => { setSession(r.session); setMe(r.user); })
+    .catch((e) => { if (e.expired) setNotice(e.message); setMe(null); });
+  useEffect(() => { load(); }, []);
+  // Keep the first reason shown: late background requests from the old page also report 401, without a reason.
+  const signedOut = useCallback((msg) => { if (typeof msg === "string" && msg) setNotice(msg); setMe(null); setSession(null); }, []);
   if (me === undefined) return <div className="boot"><span className="logo">S</span></div>;
-  if (!me) return <Login onDone={setMe} />;
-  return <DeskProvider me={me} onSignOut={() => setMe(null)}><Shell /></DeskProvider>;
+  if (!me) return <Login notice={notice} onDone={() => { setNotice(""); load(); }} />;
+  return <DeskProvider me={me} session={session} onSignOut={signedOut}><Shell /></DeskProvider>;
 }
 
 const STAFF_NAV = [
