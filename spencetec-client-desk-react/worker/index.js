@@ -84,18 +84,28 @@ const clamp = (n, a, b) => Math.min(b, Math.max(a, Math.round(n)));
 
 async function sendCode(env, email, code) {
   if (env.DEV_SHOW_CODE === "1") console.log(`[DEV] login code for ${email}: ${code}`);
-  if (!env.RESEND_API_KEY) return env.DEV_SHOW_CODE === "1";
-  const r = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      from: env.MAIL_FROM,
-      to: [email],
-      subject: `Your SpenceTec Client Desk code: ${code}`,
-      text: `Your sign-in code is ${code}\n\nIt expires in ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email.\n\nSpenceTec and Logistics Limited`,
-    }),
-  });
-  return r.ok;
+  if (!env.RESEND_API_KEY) {
+    console.error("[email] RESEND_API_KEY is not set on this Worker, so no code was sent. Run: npx wrangler secret put RESEND_API_KEY");
+    return env.DEV_SHOW_CODE === "1";
+  }
+  try {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: env.MAIL_FROM,
+        to: [email],
+        subject: `Your SpenceTec Client Desk code: ${code}`,
+        text: `Your sign-in code is ${code}\n\nIt expires in ${CODE_MINUTES} minutes. If you didn't ask for it, ignore this email.\n\nSpenceTec and Logistics Limited`,
+      }),
+    });
+    if (r.ok) console.log(`[email] code sent to ${email} from ${env.MAIL_FROM}`);
+    else console.error(`[email] Resend refused (${r.status}) sending from ${env.MAIL_FROM}: ${(await r.text()).slice(0, 300)}`);
+    return r.ok;
+  } catch (e) {
+    console.error("[email] could not reach Resend:", e.message);
+    return false;
+  }
 }
 
 function rowToClient(r) {
@@ -109,6 +119,17 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     if (!path.startsWith("/api/")) return env.ASSETS.fetch(request);
+    // Setup check: shows which settings exist (never their values). Open /api/health in a browser.
+    if (path === "/api/health" && request.method === "GET") {
+      return json({
+        worker: "ok",
+        authSecret: !!env.AUTH_SECRET,
+        resendKey: !!env.RESEND_API_KEY,
+        mailFrom: env.MAIL_FROM || "",
+        ownerEmail: !!env.OWNER_EMAIL,
+        database: !!env.DB,
+      });
+    }
     if (!env.AUTH_SECRET) return fail(500, "Server not configured (AUTH_SECRET missing)");
 
     const method = request.method;
@@ -127,6 +148,7 @@ export default {
         const user = await getUser(env, email);
         if (user) {
           const prev = await env.DB.prepare("SELECT created_at FROM login_codes WHERE email=?").bind(email).first();
+          if (prev && now() - prev.created_at < 45) console.log(`[email] code for ${email} asked again within 45 s; not resent`);
           if (!prev || now() - prev.created_at >= 45) {
             const code = randomCode();
             await env.DB.prepare(
@@ -136,6 +158,7 @@ export default {
             await sendCode(env, email, code);
           }
         }
+        else console.log(`[email] ${email} is not on the team; no code sent`);
         // Same answer whether or not the email is on the team.
         return json({ ok: true });
       }
