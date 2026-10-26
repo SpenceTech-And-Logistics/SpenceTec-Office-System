@@ -2,7 +2,25 @@
 
 React app served by one Cloudflare Worker. Data lives in a **D1 database** (SQLite). Sign-in is by **email code** (6 digits, 10 minutes) and only for people the owner adds in the Team screen.
 
-Tables: `users`, `login_codes`, `sessions`, `clients` (see `migrations/0001_init.sql`).
+Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `settings` (see `migrations/`).
+
+## Roles (v4)
+| Role | Can do |
+|---|---|
+| **Owner** | Everything. Team and roles, company settings, deleting clients and any invoice. |
+| **Secretary** | All clients and project details, tasks (with assignees), invoices and payments, photos and files. Adds clients. Can delete draft invoices only. |
+| **Sales rep** | Registers clients with photos (up to 12), an optional CV, documents and social/other links. Sees and edits only their own clients; never sees money, tasks or office notes; can't change the stage. |
+
+Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
+
+## Sign-in timeouts (v4.1)
+Secretaries and sales reps are signed out after **30 minutes without activity** and after **8 hours** at most, whichever comes first. They get a two-minute "Are you still there?" warning first, and the sign-in screen says why they were signed out. The owner can change both limits in **Settings → Sign-in security**; the owner's own sign-in isn't affected. The Worker enforces this (background refreshes don't count as activity), so closing the tab doesn't keep a session alive.
+
+## Invoices (v4)
+Billing → New invoice (or "New invoice" on a client's page). Numbers run automatically (prefix set in Settings, default `SPT-0001`). Lines, discount, optional VAT, notes. Mark as sent, record payments (M-Pesa, bank, cash, with reference), and the invoice shows Part paid / Paid / Overdue by itself. "Print or save PDF" prints just the invoice. Set your company details, KRA PIN and how-to-pay text under **Settings** (owner).
+
+## Files
+Photos, CVs and documents are stored in D1 (max 1.9 MB each; photos are resized in the browser first). For heavy use later, these can move to Cloudflare R2.
 
 ## Pages (v3 redesign)
 - **Overview** (`/`): summary tiles, tasks that are overdue or due this week, clients you're still waiting on for content, pipeline, money owed, recently changed.
@@ -30,7 +48,7 @@ npx wrangler d1 create spencetec-client-desk
 Copy the `database_id` it prints into `wrangler.jsonc` (already set to `c7f9d54f-87b4-4917-8d28-d965659956f3`). Keep a single binding named `DB`.
 
 ```bash
-npm run db:remote       # creates the tables
+npm run db:remote       # creates or updates the tables (applies any new migrations)
 npm run seed:remote     # loads the 7 starting clients (run once)
 ```
 

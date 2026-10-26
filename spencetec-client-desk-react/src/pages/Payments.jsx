@@ -3,6 +3,8 @@ import { useDesk } from "../desk.jsx";
 import { setQuery, useLocation } from "../router.jsx";
 import { ClientSelect, Empty, Icon, PageHead, PayRow, Seg } from "../ui.jsx";
 import { allPays, kes, uid, paysOf } from "../util.js";
+import { BillingTabs } from "./Invoices.jsx";
+import { Link } from "../router.jsx";
 
 export default function Payments() {
   const { clients, loaded, patch } = useDesk();
@@ -29,12 +31,14 @@ export default function Payments() {
 
   return (
     <>
-      <PageHead title="Payments" sub="Invoices and money received, in KES">
-        <Seg label="Show" value={show} onChange={(v) => setQuery("show", v === "pending" ? "" : v)} options={[["pending", "Pending"], ["paid", "Paid"], ["all", "All"]]} />
+      <PageHead title="Billing" sub="Quick deposits and balances recorded without a formal invoice">
+        <Link className="btn primary" to="/invoices/new"><Icon name="plus" size={16} />New invoice</Link>
       </PageHead>
+      <BillingTabs on="payments" />
+      <div className="filters"><Seg label="Show" value={show} onChange={(v) => setQuery("show", v === "pending" ? "" : v)} options={[["pending", "Pending"], ["paid", "Paid"], ["all", "All"]]} /></div>
 
       <section className="tiles three">
-        <div className="tile static"><span className="tl">Invoiced</span><b>{kes(sum(all))}</b><small>{all.length} payment{all.length === 1 ? "" : "s"}</small></div>
+        <div className="tile static"><span className="tl">Recorded</span><b>{kes(sum(all))}</b><small>{all.length} payment{all.length === 1 ? "" : "s"}</small></div>
         <div className="tile static ok"><span className="tl">Received</span><b>{kes(sum(done))}</b><small>{done.length} paid</small></div>
         <div className={"tile static" + (pending.length ? " warn" : "")}><span className="tl">Outstanding</span><b>{kes(sum(pending))}</b><small>{pending.length} pending</small></div>
       </section>

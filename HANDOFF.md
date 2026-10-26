@@ -49,3 +49,18 @@ In a local Worker run: unauthenticated 401, stranger gets no code, wrong code re
 - New files: `src/router.jsx` (small history router), `src/desk.jsx` (shared data and optimistic saves), `src/ui.jsx`, `src/pages/*`. Removed `Drawer.jsx` and the old `Team.jsx`.
 - Worker, schema and seed are unchanged. `wrangler.jsonc` now has the real D1 id.
 - Tested locally with wrangler dev + local D1: login by code, every page at desktop and phone widths, quick search, adding tasks and payments. Not tested yet: deployed Worker, real email.
+
+## v4: roles, invoices, sales rep pages (23 Oct 2026)
+- Roles are now owner / secretary / sales (migration `0002_roles_invoices_files.sql`; old members become secretaries). The Worker enforces them.
+- Sales reps: home page "My clients", "Register a client" (details, contacts, project, budget, about, links, up to 12 photos, optional CV). Only their own clients; no money, tasks or stage changes.
+- Secretary and owner: invoices (numbered, VAT, discount, payments received, print/PDF, email draft), project fields (package, quote, budget, start, launch deadline, sales rep, project lead), task assignees with "Mine" filter, sortable client list with rep filter, photos/CV/documents on every client, WhatsApp button.
+- Owner: Team page with role dropdowns, Settings page (company details, KRA PIN, how to pay, invoice prefix, VAT rate).
+- New tables: invoices, files (BLOBs in D1), settings. Files capped at 1.9 MB.
+- Tested locally (wrangler dev + local D1) with all three roles: 20 permission checks pass; migration tested on a v3 database with a member user.
+- To deploy: `npm run db:remote` then `npm run deploy`.
+
+## v4.1: sign-in timeouts (26 Oct 2026)
+- Secretaries and sales reps: signed out after 30 min inactivity or 8 h maximum (owner can change in Settings). Owner exempt.
+- Migration `0003_session_timeouts.sql` adds `created_at` and `last_seen` to sessions plus the two settings.
+- Worker enforces it; requests with `x-poll: 1` (20-second refresh) don't count as activity; the page pings on real activity (mouse, keys, scroll) at most once a minute and shares activity across tabs.
+- Tested: 13 timeout checks (server idle, max length, polling, owner exempt, warning, auto sign-out) + the 20 v4 checks.

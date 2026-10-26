@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { api } from "./api.js";
 
-export default function Login({ onDone }) {
+export default function Login({ onDone, notice }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [step, setStep] = useState("email");
@@ -27,6 +27,7 @@ export default function Login({ onDone }) {
         <h1>Client Desk</h1>
         <p>SpenceTec and Logistics Limited · team sign-in</p>
       </div>
+      {notice && <div className="notice" role="status">{notice}</div>}
       <div className="panel">
         {step === "email" ? (
           <form onSubmit={ask}>
