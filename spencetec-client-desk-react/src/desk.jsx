@@ -36,15 +36,15 @@ export function DeskProvider({ me, session, onSignOut, children }) {
     }
   }, [onSignOut, isStaff]);
 
-  const loadMeta = useCallback(() => {
+  const loadMeta = useCallback((poll) => {
     if (!isStaff) return;
-    api.users().then(setUsers).catch(() => {});
-    api.settings().then(setSettings).catch(() => {});
+    api.users(poll === true).then(setUsers).catch(() => {});
+    if (poll !== true) api.settings().then(setSettings).catch(() => {});
   }, [isStaff]);
 
   useEffect(() => {
     refresh(); loadMeta();
-    const t = setInterval(() => document.visibilityState === "visible" && refresh(true), 20000);
+    const t = setInterval(() => { if (document.visibilityState === "visible") { refresh(true); loadMeta(true); } }, 20000);
     const v = () => document.visibilityState === "visible" && refresh(true);
     document.addEventListener("visibilitychange", v);
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", v); };
@@ -99,7 +99,7 @@ export function DeskProvider({ me, session, onSignOut, children }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      {session?.limited && <SessionGuard session={session} onSignOut={onSignOut} />}
+      {session?.limited ? <SessionGuard session={session} onSignOut={onSignOut} /> : <ActivityPing />}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className={"toast " + t.kind}>{t.text}</div>)}
       </div>
@@ -180,4 +180,16 @@ function SessionGuard({ session, onSignOut }) {
       )}
     </>
   );
+}
+
+/* Owners don't time out, but their activity still shows them as online. */
+function ActivityPing() {
+  useEffect(() => {
+    let last = 0;
+    const f = () => { const t = Date.now(); if (t - last > 60000) { last = t; api.ping().catch(() => {}); } };
+    const evs = ["pointerdown", "keydown", "wheel", "touchstart", "mousemove", "scroll"];
+    evs.forEach((e) => window.addEventListener(e, f, { passive: true, capture: true }));
+    return () => evs.forEach((e) => window.removeEventListener(e, f, { capture: true }));
+  }, []);
+  return null;
 }

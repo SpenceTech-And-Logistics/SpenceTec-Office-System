@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { useDesk } from "../desk.jsx";
 import { Link } from "../router.jsx";
 import { Empty, Icon, Stage, TaskRow } from "../ui.jsx";
+import { statusText } from "../util.js";
 import { STAGES, ACTIVE, kes, today, daysFromNow, allTasks, byDue, owed, paid, ago, contentName, invTotals, invStatus, fmtDate, untilLabel } from "../util.js";
 
 function greet() {
@@ -10,7 +11,8 @@ function greet() {
 }
 
 export default function Overview() {
-  const { me, clients, invoices, loaded, error, person } = useDesk();
+  const { me, clients, invoices, loaded, error, person, isOwner, users } = useDesk();
+  const around = users.filter((u) => u.email !== me.email && u.status !== "offline");
   const name = me.name && me.name !== "Owner" ? me.name.split(" ")[0] : "";
 
   const d = useMemo(() => {
@@ -116,6 +118,21 @@ export default function Overview() {
         </div>
 
         <div className="stack">
+          {isOwner && (
+            <section className="card-p">
+              <div className="ch"><h2>Team now</h2><Link to="/activity" className="more">Activity<Icon name="chev" size={14} /></Link></div>
+              {around.length ? (
+                <div className="items">
+                  {around.map((u) => (
+                    <Link key={u.email} to={`/activity?person=${encodeURIComponent(u.email)}`} className="rowlink">
+                      <span className="t"><b><i className={"dot s-" + u.status} /> {person(u.email)}</b><small>{statusText(u)}</small></span>
+                    </Link>
+                  ))}
+                </div>
+              ) : <p className="quiet">Nobody else is signed in right now.</p>}
+            </section>
+          )}
+
           <section className="card-p">
             <div className="ch"><h2>Pipeline</h2><Link to="/clients" className="more">Board<Icon name="chev" size={14} /></Link></div>
             <div className="pipe">

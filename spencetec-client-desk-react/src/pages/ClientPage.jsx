@@ -3,6 +3,7 @@ import { useDesk } from "../desk.jsx";
 import { Link, navigate } from "../router.jsx";
 import { Empty, Icon, InvPill, PageHead, PayRow, PersonSelect, Stage, TaskRow } from "../ui.jsx";
 import { ClientFiles, EditCard, LinksCard } from "../profile.jsx";
+import { ActivityFeed } from "./Activity.jsx";
 import { STAGES, CONTENT, kes, uid, today, tasksOf, paysOf, owed, paid, ago, href, waLink, invTotals, invNo, fmtDate, untilLabel } from "../util.js";
 
 const PROFILE = [
@@ -113,6 +114,10 @@ function StaffView({ c }) {
           <ClientInvoices c={c} />
           <Payments c={c} />
           <ClientFiles c={c} />
+          <section className="card-p">
+            <div className="ch"><h2>History</h2></div>
+            <ActivityFeed params={{ target: c.id }} compact empty="No changes recorded yet." />
+          </section>
         </div>
         <div className="stack">
           <EditCard title="Project" c={c} fields={PROJECT} />

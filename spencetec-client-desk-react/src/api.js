@@ -19,6 +19,8 @@ export const api = {
   requestCode: (email) => req("POST", "/api/auth/request", { email }),
   verify: (email, code) => req("POST", "/api/auth/verify", { email, code }),
   logout: () => req("POST", "/api/auth/logout"),
+  passwordLogin: (username, password) => req("POST", "/api/auth/password", { username, password }),
+  changePassword: (current, password) => req("POST", "/api/auth/change-password", { current, password }),
 
   clients: (poll) => req("GET", "/api/clients", null, null, poll),
   saveClient: (id, data) => req("PUT", `/api/clients/${e(id)}`, data),
@@ -37,8 +39,12 @@ export const api = {
   settings: () => req("GET", "/api/settings"),
   saveSettings: (data) => req("PUT", "/api/settings", data),
 
-  users: () => req("GET", "/api/users"),
+  users: (poll) => req("GET", "/api/users", null, null, poll),
+  signOutUser: (email) => req("POST", `/api/users/${e(email)}/signout`),
+  activity: (params = {}) => req("GET", "/api/activity?" + new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString(), null, null, true),
   addUser: (email, name, role) => req("POST", "/api/users", { email, name, role }),
+  addUsername: (username, name) => req("POST", "/api/users", { username, name }),
+  resetPassword: (id) => req("PATCH", `/api/users/${e(id)}`, { resetPassword: true }),
   patchUser: (email, data) => req("PATCH", `/api/users/${e(email)}`, data),
   removeUser: (email) => req("DELETE", `/api/users/${e(email)}`),
 };

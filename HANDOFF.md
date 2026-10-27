@@ -64,3 +64,14 @@ In a local Worker run: unauthenticated 401, stranger gets no code, wrong code re
 - Migration `0003_session_timeouts.sql` adds `created_at` and `last_seen` to sessions plus the two settings.
 - Worker enforces it; requests with `x-poll: 1` (20-second refresh) don't count as activity; the page pings on real activity (mouse, keys, scroll) at most once a minute and shares activity across tabs.
 - Tested: 13 timeout checks (server idle, max length, polling, owner exempt, warning, auto sign-out) + the 20 v4 checks.
+
+## v4.2: sales rep usernames + email diagnostics (27 Oct 2026)
+- Sales reps can sign in with username + password (no email). Migration `0004_sales_passwords.sql` adds login/pw columns to users; for these accounts users.email holds the username.
+- Owner creates them on Team (temporary password shown once, WhatsApp/copy), Reset password, 15-minute lock after 5 wrong tries, forced change on first sign-in.
+- `/api/health` shows which settings exist; Worker logs say why a code wasn't sent (`npx wrangler tail`).
+- Cloudflare Git build settings for the Worker must be: root `spencetec-client-desk-react`, build `npm run build`, deploy `npx wrangler deploy`. A bad automatic build once deployed only static files and wiped secrets.
+
+## v4.3: online status + activity log (27 Oct 2026)
+- users.last_seen_at / last_signin_at; status online (<=3 min) / idle (signed in) / offline computed in GET /api/users.
+- activity table (migration 0005): logged by the Worker for auth, clients (stage/tasks/payments/fields), invoices (filed under the client), files, team, settings. GET /api/activity (owner; secretaries only with ?target=client). POST /api/users/:id/signout (owner).
+- Owners now ping on activity too (no time-outs) so they show as online.
