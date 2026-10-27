@@ -13,6 +13,9 @@ Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `set
 
 Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
 
+## Sales rep usernames (v4.2)
+Sales reps don't need an email address. On **Team**, choose role *Sales rep* → *Username and password*, type their name (a username is suggested) and click **Create login**. You get a temporary password to send them (Copy or WhatsApp buttons); it's shown only once. On first sign-in ("Sales rep username" on the sign-in screen) they must choose their own password (8+ characters). Forgotten password: **Reset password** on Team gives a new temporary one and signs them out everywhere. Five wrong passwords lock the account for 15 minutes. Passwords are stored as PBKDF2 hashes; nobody can read them. Username accounts can only ever be sales reps.
+
 ## Sign-in timeouts (v4.1)
 Secretaries and sales reps are signed out after **30 minutes without activity** and after **8 hours** at most, whichever comes first. They get a two-minute "Are you still there?" warning first, and the sign-in screen says why they were signed out. The owner can change both limits in **Settings → Sign-in security**; the owner's own sign-in isn't affected. The Worker enforces this (background refreshes don't count as activity), so closing the tab doesn't keep a session alive.
 

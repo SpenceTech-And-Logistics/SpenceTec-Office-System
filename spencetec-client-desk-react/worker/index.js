@@ -44,7 +44,43 @@ async function ensureOwner(env, email) {
   }
 }
 const getUser = (env, email) =>
-  env.DB.prepare("SELECT email,name,role FROM users WHERE email=?").bind(email).first();
+  env.DB.prepare("SELECT email,name,role,login,must_change AS mustChange FROM users WHERE email=?").bind(email).first();
+
+/* ---------- passwords (sales reps only) ---------- */
+// PBKDF2-SHA256 with a random salt per person. 100,000 rounds is the most Workers allows.
+const PW_ROUNDS = 100000;
+const hex = (buf) => [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, "0")).join("");
+async function hashPassword(password, saltHex) {
+  const salt = saltHex ? Uint8Array.from(saltHex.match(/../g).map((h) => parseInt(h, 16))) : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: PW_ROUNDS }, key, 256);
+  return { hash: hex(bits), salt: hex(salt) };
+}
+function sameText(a, b) { // constant-time compare
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+// Readable temporary password, e.g. "kite-74-river" (no look-alike characters).
+const WORDS = ["amber","baobab","cedar","delta","eagle","falcon","garden","harbor","island","jungle","kite","lion","maple","nile","ocean","pepper","quartz","river","safari","tiger","umbra","valley","willow","zebra","coral","ember","meadow","summit","lagoon","acacia"];
+function tempPassword() {
+  const r = crypto.getRandomValues(new Uint32Array(3));
+  return `${WORDS[r[0] % WORDS.length]}-${10 + (r[1] % 90)}-${WORDS[r[2] % WORDS.length]}`;
+}
+const validUsername = (u) => /^[a-z0-9][a-z0-9._-]{2,29}$/.test(u);
+const checkNewPassword = (p) =>
+  typeof p !== "string" || p.length < 8 ? "Use at least 8 characters." : p.length > 128 ? "That password is too long." : "";
+
+async function startSession(env, email) {
+  const token = randomToken();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()),
+    env.DB.prepare("INSERT INTO sessions (token_hash,email,expires_at,created_at,last_seen) VALUES (?,?,?,?,?)")
+      .bind(await sha256(token), email, now() + SESSION_DAYS * 86400, now(), now()),
+  ]);
+  return `sid=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`;
+}
 
 // Returns { user, session } when signed in, { expired: "reason" } when a timeout ended it, or null.
 // Owners keep the long session; secretaries and sales reps are signed out after inactivity or a maximum time.
@@ -175,16 +211,37 @@ export default {
         }
         const user = await getUser(env, email);
         if (!user) return fail(401, "Code expired. Ask for a new one.");
+        if (user.login === "password") return fail(401, "Code expired. Ask for a new one.");
         await env.DB.prepare("DELETE FROM login_codes WHERE email=?").bind(email).run();
-        const token = randomToken();
-        await env.DB.batch([
-          env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()),
-          env.DB.prepare("INSERT INTO sessions (token_hash,email,expires_at,created_at,last_seen) VALUES (?,?,?,?,?)")
-            .bind(await sha256(token), email, now() + SESSION_DAYS * 86400, now(), now()),
-        ]);
-        return json({ user }, 200, {
-          "Set-Cookie": `sid=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`,
-        });
+        return json({ user }, 200, { "Set-Cookie": await startSession(env, email) });
+      }
+
+      /* ---------- username + password (sales reps) ---------- */
+      if (path === "/api/auth/password" && method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        const username = String(body.username || "").trim().toLowerCase();
+        const password = String(body.password || "");
+        const row = validUsername(username)
+          ? await env.DB.prepare("SELECT email,role,login,pw_hash,pw_salt,failed,locked_until FROM users WHERE email=?").bind(username).first()
+          : null;
+        const usable = row && row.login === "password" && row.role === "sales" && row.pw_hash;
+        if (usable && row.locked_until > now()) {
+          const mins = Math.ceil((row.locked_until - now()) / 60);
+          return fail(429, `Too many wrong passwords. Try again in ${mins} minute${mins === 1 ? "" : "s"}, or ask the office to reset it.`);
+        }
+        // Hash even when the username doesn't exist, so both cases take the same time.
+        const { hash } = await hashPassword(password, usable ? row.pw_salt : "00000000000000000000000000000000");
+        if (!usable || !sameText(hash, row.pw_hash)) {
+          if (usable) {
+            const failed = row.failed + 1;
+            await env.DB.prepare("UPDATE users SET failed=?, locked_until=? WHERE email=?")
+              .bind(failed >= 5 ? 0 : failed, failed >= 5 ? now() + 15 * 60 : 0, username).run();
+            if (failed >= 5) return fail(429, "Too many wrong passwords. Try again in 15 minutes, or ask the office to reset it.");
+          }
+          return fail(401, "Wrong username or password.");
+        }
+        await env.DB.prepare("UPDATE users SET failed=0, locked_until=0 WHERE email=?").bind(username).run();
+        return json({ user: await getUser(env, username) }, 200, { "Set-Cookie": await startSession(env, username) });
       }
 
       if (path === "/api/auth/logout" && method === "POST") {
@@ -204,6 +261,29 @@ export default {
       if (path === "/api/me" && method === "GET") return json({ user: me, session: auth.session });
       // Activity heartbeat from the page (mouse, keys, scrolling). sessionUser already recorded it.
       if (path === "/api/ping" && method === "POST") return json({ ok: true, session: auth.session });
+
+      // Sales reps with a password: choose a new one (required after the office sets a temporary one).
+      if (path === "/api/auth/change-password" && method === "POST") {
+        if (me.login !== "password") return fail(400, "You sign in with an email code, so there's no password to change.");
+        const body = await request.json().catch(() => ({}));
+        const bad = checkNewPassword(body.password);
+        if (bad) return fail(400, bad);
+        const row = await env.DB.prepare("SELECT pw_hash,pw_salt FROM users WHERE email=?").bind(me.email).first();
+        if (!me.mustChange) {
+          const { hash } = await hashPassword(String(body.current || ""), row.pw_salt);
+          if (!sameText(hash, row.pw_hash)) return fail(401, "Your current password isn't right.");
+        }
+        const same = await hashPassword(body.password, row.pw_salt);
+        if (sameText(same.hash, row.pw_hash)) return fail(400, "Choose a password different from the old one.");
+        const fresh = await hashPassword(body.password);
+        const keep = await sha256(cookie(request, "sid"));
+        await env.DB.batch([
+          env.DB.prepare("UPDATE users SET pw_hash=?, pw_salt=?, must_change=0, failed=0, locked_until=0 WHERE email=?").bind(fresh.hash, fresh.salt, me.email),
+          env.DB.prepare("DELETE FROM sessions WHERE email=? AND token_hash<>?").bind(me.email, keep), // sign out other devices
+        ]);
+        return json({ ok: true });
+      }
+      if (me.mustChange) return fail(403, "Choose a new password first.");
       const isOwner = me.role === "owner";
       const isStaff = isOwner || me.role === "secretary";
       const isSales = me.role === "sales";
@@ -227,16 +307,27 @@ export default {
         if (method === "GET") {
           // Secretaries need the list to assign tasks and sales reps; only the owner manages it.
           if (!isStaff) return fail(403, "Not allowed");
-          const { results } = await env.DB.prepare("SELECT email,name,role,created_at FROM users ORDER BY email").all();
+          const { results } = await env.DB.prepare("SELECT email,name,role,login,must_change AS mustChange,locked_until AS lockedUntil,created_at FROM users ORDER BY email").all();
           return json(results);
         }
         if (method === "POST") {
           if (!isOwner) return fail(403, "Owner only");
           const b = await readJson();
+          const name = String(b.name || "").trim().slice(0, 80);
+          if (b.username !== undefined) {
+            // Sales rep with a username and a temporary password.
+            const username = String(b.username).trim().toLowerCase();
+            if (!validUsername(username)) return fail(400, "Usernames are 3 to 30 characters: small letters, numbers, dots, dashes or underscores.");
+            if (await getUser(env, username)) return fail(409, "That username is taken. Choose another.");
+            const temp = tempPassword();
+            const { hash, salt } = await hashPassword(temp);
+            await env.DB.prepare("INSERT INTO users (email,name,role,login,pw_hash,pw_salt,must_change) VALUES (?,?,'sales','password',?,?,1)")
+              .bind(username, name, hash, salt).run();
+            return json({ ok: true, username, tempPassword: temp });
+          }
           const email = normEmail(b.email);
           if (!validEmail(email)) return fail(400, "Enter a valid email address");
           const role = ROLES.includes(b.role) ? b.role : "sales";
-          const name = String(b.name || "").trim().slice(0, 80);
           if (email === normEmail(env.OWNER_EMAIL) && role !== "owner") return fail(400, "The main owner must stay an owner");
           await env.DB.prepare("INSERT INTO users (email,name,role) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name, role=excluded.role")
             .bind(email, name, role).run();
@@ -252,8 +343,20 @@ export default {
         const isMain = email === normEmail(env.OWNER_EMAIL);
         if (method === "PATCH") {
           const b = await readJson();
+          if (b.resetPassword) {
+            if (u.login !== "password") return fail(400, "This person signs in with an email code.");
+            const temp = tempPassword();
+            const { hash, salt } = await hashPassword(temp);
+            await env.DB.batch([
+              env.DB.prepare("UPDATE users SET pw_hash=?, pw_salt=?, must_change=1, failed=0, locked_until=0 WHERE email=?").bind(hash, salt, email),
+              env.DB.prepare("DELETE FROM sessions WHERE email=?").bind(email),
+            ]);
+            return json({ ok: true, username: email, tempPassword: temp });
+          }
           const role = b.role === undefined ? u.role : b.role;
           if (!ROLES.includes(role)) return fail(400, "Bad role");
+          if (u.login === "password" && role !== "sales")
+            return fail(400, "Username accounts can only be sales reps. To give a bigger role, add the person with an email address.");
           if ((isMain || email === me.email) && role !== "owner") return fail(400, isMain ? "The main owner must stay an owner" : "You can't remove your own owner role");
           const name = b.name === undefined ? u.name : String(b.name).trim().slice(0, 80);
           await env.DB.prepare("UPDATE users SET role=?, name=? WHERE email=?").bind(role, name, email).run();

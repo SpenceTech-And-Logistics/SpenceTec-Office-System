@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
-import Login from "./Login.jsx";
+import Login, { ChangePassword } from "./Login.jsx";
 import { DeskProvider, useDesk } from "./desk.jsx";
 import { Link, navigate, useLocation } from "./router.jsx";
 import { Icon, Stage } from "./ui.jsx";
@@ -28,6 +28,7 @@ export default function App() {
   const signedOut = useCallback((msg) => { if (typeof msg === "string" && msg) setNotice(msg); setMe(null); setSession(null); }, []);
   if (me === undefined) return <div className="boot"><span className="logo">S</span></div>;
   if (!me) return <Login notice={notice} onDone={() => { setNotice(""); load(); }} />;
+  if (me.mustChange) return <ChangePassword forced onDone={load} onSignOut={async () => { await api.logout().catch(() => {}); signedOut(""); }} />;
   return <DeskProvider me={me} session={session} onSignOut={signedOut}><Shell /></DeskProvider>;
 }
 
@@ -43,9 +44,11 @@ const SALES_NAV = [
 ];
 
 function Shell() {
-  const { me, isOwner, isSales, clients, onSignOut } = useDesk();
+  const { me, isOwner, isSales, clients, onSignOut, toast } = useDesk();
   const { path } = useLocation();
   const [menu, setMenu] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
+  const usesPassword = me.login === "password";
   const late = isSales ? 0 : clients.reduce((a, c) => a + overdue(c).length, 0);
 
   const base = isSales ? SALES_NAV : STAFF_NAV;
@@ -108,6 +111,7 @@ function Shell() {
         <div className="me">
           <span className="avatar">{initial}</span>
           <span className="who"><b>{display}</b><small>{roleName(me.role)}</small></span>
+          {usesPassword && <button className="icon-btn" title="Change password" aria-label="Change password" onClick={() => setPwOpen(true)}><Icon name="gear" /></button>}
           <button className="icon-btn" title="Sign out" aria-label="Sign out" onClick={signOut}><Icon name="out" /></button>
         </div>
       </aside>
@@ -121,9 +125,10 @@ function Shell() {
             <button className="avatar as-btn" aria-label="Account menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>{initial}</button>
             {menu && (
               <div className="menu" role="menu">
-                <span className="menu-who">{me.email} · {roleName(me.role)}</span>
+                <span className="menu-who">{usesPassword ? `${me.name || me.email} (${me.email})` : me.email} · {roleName(me.role)}</span>
                 {isOwner && <Link to="/team" role="menuitem"><Icon name="team" />Team and roles</Link>}
                 {isOwner && <Link to="/settings" role="menuitem"><Icon name="gear" />Company settings</Link>}
+                {usesPassword && <button role="menuitem" onClick={() => { setMenu(false); setPwOpen(true); }}><Icon name="gear" />Change password</button>}
                 <button role="menuitem" onClick={signOut}><Icon name="out" />Sign out</button>
               </div>
             )}
@@ -133,6 +138,7 @@ function Shell() {
         <footer className="foot">Built by SpenceTec and Logistics Limited{!isSales && " · amounts in KES"}<span className="hint"> · press <kbd>/</kbd> to search, <kbd>N</kbd> for a new client</span></footer>
       </div>
 
+      {pwOpen && <ChangePassword onDone={() => { setPwOpen(false); toast("Password changed. Other devices were signed out.", "ok"); }} onCancel={() => setPwOpen(false)} />}
       <nav className={"tabbar" + (isSales ? " two" : "")} aria-label="Main">
         {base.map(([to, n, ic]) => (
           <Link key={to} to={to} aria-current={active(to) ? "page" : undefined}>
