@@ -70,3 +70,8 @@ In a local Worker run: unauthenticated 401, stranger gets no code, wrong code re
 - Owner creates them on Team (temporary password shown once, WhatsApp/copy), Reset password, 15-minute lock after 5 wrong tries, forced change on first sign-in.
 - `/api/health` shows which settings exist; Worker logs say why a code wasn't sent (`npx wrangler tail`).
 - Cloudflare Git build settings for the Worker must be: root `spencetec-client-desk-react`, build `npm run build`, deploy `npx wrangler deploy`. A bad automatic build once deployed only static files and wiped secrets.
+
+## v4.3: online status + activity log (27 Oct 2026)
+- users.last_seen_at / last_signin_at; status online (<=3 min) / idle (signed in) / offline computed in GET /api/users.
+- activity table (migration 0005): logged by the Worker for auth, clients (stage/tasks/payments/fields), invoices (filed under the client), files, team, settings. GET /api/activity (owner; secretaries only with ?target=client). POST /api/users/:id/signout (owner).
+- Owners now ping on activity too (no time-outs) so they show as online.

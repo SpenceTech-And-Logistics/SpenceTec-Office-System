@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { api } from "../api.js";
 import { useDesk } from "../desk.jsx";
 import { Empty, Icon, PageHead } from "../ui.jsx";
-import { ROLES, ROLE_HELP, roleName } from "../util.js";
+import { ROLES, ROLE_HELP, roleName, statusText } from "../util.js";
+import { Link } from "../router.jsx";
 
 export default function Team() {
   const { me, isOwner, users, loadMeta, toast, clients } = useDesk();
@@ -55,11 +56,11 @@ export default function Team() {
       <PageHead title="Team and roles" sub="Who can sign in, and what each person can do" />
       <div className="cols">
         <section className="card-p">
-          <div className="ch"><h2>People</h2><span className="count">{users.length}</span></div>
+          <div className="ch"><h2>People</h2><span className="count">{users.filter((u) => u.status === "online").length} of {users.length} online</span></div>
           <div className="items">
             {!users.length ? <p className="quiet">Loading…</p> : users.map((u) => (
               <div className="item team" key={u.email}>
-                <span className="avatar sm">{label(u)[0].toUpperCase()}</span>
+                <span className="avatar sm with-dot">{label(u)[0].toUpperCase()}<i className={"dot s-" + u.status} title={statusText(u)} /></span>
                 <span className="t">
                   <span className="tt">{label(u)}{u.email === me.email ? " (you)" : ""}</span>
                   <span className="meta">
@@ -68,6 +69,7 @@ export default function Team() {
                     {u.lockedUntil * 1000 > Date.now() && <span className="pill bad">Locked</span>}
                     {u.role === "sales" && <span>{regs(u.email)} client{regs(u.email) === 1 ? "" : "s"}</span>}
                   </span>
+                  <span className="meta"><span className={"st s-" + u.status}>{statusText(u)}</span><Link className="clink" to={`/activity?person=${encodeURIComponent(u.email)}`}>Activity</Link></span>
                 </span>
                 {u.login === "password" ? (
                   <button className={"btn sm" + (confirm === "reset:" + u.email ? " primary" : "")} onBlur={() => setConfirm("")} onClick={() => reset(u)}

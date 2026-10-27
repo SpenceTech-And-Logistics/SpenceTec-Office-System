@@ -130,3 +130,23 @@ export function untilLabel(d) {
   if (n > 1) return `in ${n} days`;
   return `${-n} day${n === -1 ? "" : "s"} late`;
 }
+
+/* ---------- online status ---------- */
+// Unix seconds -> "just now", "5 min ago", "3 h ago", "yesterday", "12 Oct"
+export function agoUnix(t) {
+  if (!t) return "";
+  const m = Math.round((Date.now() / 1000 - t) / 60);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  const d = Math.round(h / 24);
+  if (d === 1) return "yesterday";
+  if (d < 7) return `${d} days ago`;
+  return new Date(t * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+export function statusText(u) {
+  if (u.status === "online") return "Online now";
+  if (u.status === "idle") return `Signed in, idle · active ${agoUnix(u.lastSeen)}`;
+  return u.lastSeen ? `Offline · last active ${agoUnix(u.lastSeen)}` : "Never signed in";
+}

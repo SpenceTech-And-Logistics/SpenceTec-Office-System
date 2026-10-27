@@ -13,6 +13,13 @@ Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `set
 
 Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
 
+## Online status and activity log (v4.3)
+- **Team** shows a dot for each person: green *Online now* (active in the last 3 minutes), amber *Idle* (signed in but quiet), grey *Offline · last active …*. Background refreshes don't count as activity; mouse, keys and scrolling do.
+- **Activity** (owner only, in the sidebar) lists who did what: sign-ins and sign-outs, time-outs, lockouts, clients added and edited, stage moves, tasks, payments, invoices, files, team and settings changes. Filter by type or person. Kept for 180 days.
+- Pick a person on Activity to see their status and devices, and **Sign out everywhere** if needed.
+- Each client page has a **History** card (owner and secretary). The Overview shows **Team now** for the owner.
+- Migration `0005_activity.sql`.
+
 ## Sales rep usernames (v4.2)
 Sales reps don't need an email address. On **Team**, choose role *Sales rep* → *Username and password*, type their name (a username is suggested) and click **Create login**. You get a temporary password to send them (Copy or WhatsApp buttons); it's shown only once. On first sign-in ("Sales rep username" on the sign-in screen) they must choose their own password (8+ characters). Forgotten password: **Reset password** on Team gives a new temporary one and signs them out everywhere. Five wrong passwords lock the account for 15 minutes. Passwords are stored as PBKDF2 hashes; nobody can read them. Username accounts can only ever be sales reps.
 

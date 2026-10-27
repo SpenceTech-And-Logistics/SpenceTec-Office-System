@@ -78,6 +78,7 @@ async function startSession(env, email) {
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()),
     env.DB.prepare("INSERT INTO sessions (token_hash,email,expires_at,created_at,last_seen) VALUES (?,?,?,?,?)")
       .bind(await sha256(token), email, now() + SESSION_DAYS * 86400, now(), now()),
+    env.DB.prepare("UPDATE users SET last_signin_at=?, last_seen_at=? WHERE email=?").bind(now(), now(), email),
   ]);
   return `sid=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`;
 }
@@ -92,31 +93,78 @@ async function sessionUser(request, env) {
   if (!row || row.expires_at < now()) return null;
   const user = await getUser(env, row.email); // null if the owner has since removed them
   if (!user) return null;
-  if (user.role === "owner") return { user, session: { limited: false } };
+  const t0 = now();
+  const seen0 = row.last_seen || row.created_at || t0;
+  // Background refreshes (x-poll) don't count as activity. Write at most every 30 s.
+  const touch = async () => {
+    if (request.headers.get("x-poll") === "1" || t0 - seen0 < 30) return seen0;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE sessions SET last_seen=? WHERE token_hash=?").bind(t0, hash),
+      env.DB.prepare("UPDATE users SET last_seen_at=? WHERE email=?").bind(t0, row.email),
+    ]);
+    return t0;
+  };
+  if (user.role === "owner") { await touch(); return { user, session: { limited: false } }; }
 
   const { results } = await env.DB.prepare("SELECT key,value FROM settings WHERE key IN ('idleMinutes','maxHours')").all();
   const cfg = Object.fromEntries(results.map((r) => [r.key, +r.value]));
   const idleMinutes = clamp(cfg.idleMinutes || 30, 5, 480);
   const maxHours = clamp(cfg.maxHours || 8, 1, 72);
-  const created = row.created_at || now();
-  const seen = row.last_seen || created;
-  const t0 = now();
+  const created = row.created_at || t0;
+  const seen = seen0;
   let expired = "";
   if (t0 - seen > idleMinutes * 60) expired = `You were signed out after ${idleMinutes} minutes without activity.`;
   else if (t0 - created > maxHours * 3600) expired = `You were signed out because sign-ins last ${maxHours} hour${maxHours === 1 ? "" : "s"}. Sign in again to continue.`;
   if (expired) {
     await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?").bind(hash).run();
+    await logActivity(env, row.email, "auth", "timeout", expired.startsWith("You were signed out after") ? "was signed out for inactivity" : "was signed out at the end of the sign-in time limit");
     return { expired };
   }
-  // Background refreshes (x-poll) don't count as activity. Write at most every 30 s.
-  let lastSeen = seen;
-  if (request.headers.get("x-poll") !== "1" && t0 - seen >= 30) {
-    await env.DB.prepare("UPDATE sessions SET last_seen=? WHERE token_hash=?").bind(t0, hash).run();
-    lastSeen = t0;
-  }
+  const lastSeen = await touch();
   return { user, session: { limited: true, idleMinutes, maxHours, lastSeen, endsAt: created + maxHours * 3600 } };
 }
 const clamp = (n, a, b) => Math.min(b, Math.max(a, Math.round(n)));
+
+/* ---------- activity log ---------- */
+async function logActivity(env, email, kind, action, summary, target = "", targetName = "") {
+  try {
+    const stmts = [env.DB.prepare("INSERT INTO activity (at,email,kind,action,target,target_name,summary) VALUES (?,?,?,?,?,?,?)")
+      .bind(now(), email, kind, action, String(target).slice(0, 80), String(targetName).slice(0, 120), String(summary).slice(0, 300))];
+    if (Math.random() < 0.02) stmts.push(env.DB.prepare("DELETE FROM activity WHERE at < ?").bind(now() - 180 * 86400));
+    await env.DB.batch(stmts);
+  } catch (e) { console.error("[activity]", e.message); } // never block the real work
+}
+const FIELD_NAMES = {
+  name: "name", title: "title", org: "organisation", location: "location", phone: "phone", whatsapp: "WhatsApp", email: "email",
+  source: "how we met", about: "about", type: "project", package: "package", quote: "quoted price", budget: "budget",
+  start: "start date", deadline: "launch deadline", rep: "sales rep", lead: "project lead", domain: "domain", hosting: "hosting",
+  repo: "repository", firebase: "Firebase project", content: "content status", notes: "notes", repNotes: "rep notes", links: "links",
+};
+const STAGE_NAMES = { enquiry: "Enquiry", design: "Design", build: "Build", review: "Review", live: "Live", maintenance: "Maintenance" };
+// Turn a client change into readable activity lines.
+function describeClientChange(cur, next) {
+  const out = [];
+  const byId = (xs) => Object.fromEntries((xs || []).map((x) => [x.id, x]));
+  if (cur.stage !== next.stage) out.push(["stage", `moved {client} from ${STAGE_NAMES[cur.stage] || cur.stage} to ${STAGE_NAMES[next.stage] || next.stage}`]);
+  const ta = byId(cur.tasks), tb = byId(next.tasks);
+  for (const [id, t] of Object.entries(tb)) {
+    if (!ta[id]) out.push(["task_add", `added task "${t.text}" for {client}`]);
+    else if (!ta[id].done && t.done) out.push(["task_done", `completed task "${t.text}" for {client}`]);
+    else if (ta[id].done && !t.done) out.push(["task_reopen", `reopened task "${t.text}" for {client}`]);
+    else if ((ta[id].assignee || "") !== (t.assignee || "")) out.push(["task_assign", `assigned task "${t.text}" for {client} to ${t.assignee || "nobody"}`]);
+  }
+  for (const [id, t] of Object.entries(ta)) if (!tb[id]) out.push(["task_remove", `removed task "${t.text}" from {client}`]);
+  const pa = byId(cur.payments), pb = byId(next.payments);
+  const kes = (n) => "KES " + Math.round(+n || 0).toLocaleString("en-KE");
+  for (const [id, p] of Object.entries(pb)) {
+    if (!pa[id]) out.push(["payment_add", `recorded payment "${p.label}" (${kes(p.amount)}) for {client}`]);
+    else if (pa[id].status !== "paid" && p.status === "paid") out.push(["payment_paid", `marked "${p.label}" (${kes(p.amount)}) as paid for {client}`]);
+  }
+  for (const [id, p] of Object.entries(pa)) if (!pb[id]) out.push(["payment_remove", `removed payment "${p.label}" from {client}`]);
+  const other = Object.keys(FIELD_NAMES).filter((k) => JSON.stringify(cur[k] ?? "") !== JSON.stringify(next[k] ?? ""));
+  if (other.length) out.push(["edit", `updated ${other.map((k) => FIELD_NAMES[k]).join(", ")} for {client}`]);
+  return out;
+}
 
 async function sendCode(env, email, code) {
   if (env.DEV_SHOW_CODE === "1") console.log(`[DEV] login code for ${email}: ${code}`);
@@ -213,7 +261,9 @@ export default {
         if (!user) return fail(401, "Code expired. Ask for a new one.");
         if (user.login === "password") return fail(401, "Code expired. Ask for a new one.");
         await env.DB.prepare("DELETE FROM login_codes WHERE email=?").bind(email).run();
-        return json({ user }, 200, { "Set-Cookie": await startSession(env, email) });
+        const cookieHeader = await startSession(env, email);
+        await logActivity(env, email, "auth", "signin", "signed in with an email code");
+        return json({ user }, 200, { "Set-Cookie": cookieHeader });
       }
 
       /* ---------- username + password (sales reps) ---------- */
@@ -236,17 +286,25 @@ export default {
             const failed = row.failed + 1;
             await env.DB.prepare("UPDATE users SET failed=?, locked_until=? WHERE email=?")
               .bind(failed >= 5 ? 0 : failed, failed >= 5 ? now() + 15 * 60 : 0, username).run();
+            if (failed >= 5) await logActivity(env, username, "auth", "locked", "was locked out for 15 minutes after 5 wrong passwords");
             if (failed >= 5) return fail(429, "Too many wrong passwords. Try again in 15 minutes, or ask the office to reset it.");
           }
           return fail(401, "Wrong username or password.");
         }
         await env.DB.prepare("UPDATE users SET failed=0, locked_until=0 WHERE email=?").bind(username).run();
-        return json({ user: await getUser(env, username) }, 200, { "Set-Cookie": await startSession(env, username) });
+        const cookieHeader = await startSession(env, username);
+        await logActivity(env, username, "auth", "signin", "signed in with username and password");
+        return json({ user: await getUser(env, username) }, 200, { "Set-Cookie": cookieHeader });
       }
 
       if (path === "/api/auth/logout" && method === "POST") {
         const t = cookie(request, "sid");
-        if (t) await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?").bind(await sha256(t)).run();
+        if (t) {
+          const h = await sha256(t);
+          const srow = await env.DB.prepare("SELECT email FROM sessions WHERE token_hash=?").bind(h).first();
+          await env.DB.prepare("DELETE FROM sessions WHERE token_hash=?").bind(h).run();
+          if (srow) await logActivity(env, srow.email, "auth", "signout", "signed out");
+        }
         return json({ ok: true }, 200, { "Set-Cookie": "sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0" });
       }
 
@@ -281,6 +339,7 @@ export default {
           env.DB.prepare("UPDATE users SET pw_hash=?, pw_salt=?, must_change=0, failed=0, locked_until=0 WHERE email=?").bind(fresh.hash, fresh.salt, me.email),
           env.DB.prepare("DELETE FROM sessions WHERE email=? AND token_hash<>?").bind(me.email, keep), // sign out other devices
         ]);
+        await logActivity(env, me.email, "auth", "password", me.mustChange ? "chose their own password" : "changed their password");
         return json({ ok: true });
       }
       if (me.mustChange) return fail(403, "Choose a new password first.");
@@ -307,8 +366,20 @@ export default {
         if (method === "GET") {
           // Secretaries need the list to assign tasks and sales reps; only the owner manages it.
           if (!isStaff) return fail(403, "Not allowed");
-          const { results } = await env.DB.prepare("SELECT email,name,role,login,must_change AS mustChange,locked_until AS lockedUntil,created_at FROM users ORDER BY email").all();
-          return json(results);
+          const { results } = await env.DB.prepare(
+            "SELECT u.email,u.name,u.role,u.login,u.must_change AS mustChange,u.locked_until AS lockedUntil,u.created_at," +
+            " u.last_seen_at AS lastSeen, u.last_signin_at AS lastSignin," +
+            " (SELECT COUNT(*) FROM sessions s WHERE s.email=u.email AND s.expires_at>?) AS sessions," +
+            " (SELECT MAX(s.last_seen) FROM sessions s WHERE s.email=u.email AND s.expires_at>?) AS sessionSeen" +
+            " FROM users u ORDER BY u.email").bind(now(), now()).all();
+          const cfg = Object.fromEntries((await env.DB.prepare("SELECT key,value FROM settings WHERE key='idleMinutes'").all()).results.map((r) => [r.key, +r.value]));
+          const idle = clamp(cfg.idleMinutes || 30, 5, 480) * 60;
+          const t0 = now();
+          return json(results.map(({ sessionSeen, ...u }) => {
+            const signedIn = u.sessions > 0 && (u.role === "owner" || t0 - (sessionSeen || 0) <= idle);
+            const recent = t0 - (u.lastSeen || 0);
+            return { ...u, status: signedIn && recent <= 180 ? "online" : signedIn ? "idle" : "offline" };
+          }));
         }
         if (method === "POST") {
           if (!isOwner) return fail(403, "Owner only");
@@ -323,6 +394,7 @@ export default {
             const { hash, salt } = await hashPassword(temp);
             await env.DB.prepare("INSERT INTO users (email,name,role,login,pw_hash,pw_salt,must_change) VALUES (?,?,'sales','password',?,?,1)")
               .bind(username, name, hash, salt).run();
+            await logActivity(env, me.email, "team", "user_add", `created a username login for ${name || username} (sales rep)`, username, name || username);
             return json({ ok: true, username, tempPassword: temp });
           }
           const email = normEmail(b.email);
@@ -331,9 +403,43 @@ export default {
           if (email === normEmail(env.OWNER_EMAIL) && role !== "owner") return fail(400, "The main owner must stay an owner");
           await env.DB.prepare("INSERT INTO users (email,name,role) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name, role=excluded.role")
             .bind(email, name, role).run();
+          await logActivity(env, me.email, "team", "user_add", `gave ${name || email} access as ${ROLE_NAMES[role]}`, email, name || email);
           return json({ ok: true });
         }
       }
+      const so = path.match(/^\/api\/users\/([^/]+)\/signout$/);
+      if (so && method === "POST") {
+        if (!isOwner) return fail(403, "Owner only");
+        const email = normEmail(decodeURIComponent(so[1]));
+        if (email === me.email) return fail(400, "Use Sign out for yourself.");
+        const n = await env.DB.prepare("SELECT COUNT(*) n FROM sessions WHERE email=?").bind(email).first();
+        await env.DB.prepare("DELETE FROM sessions WHERE email=?").bind(email).run();
+        await logActivity(env, me.email, "team", "force_signout", `signed ${email} out of ${n.n} device${n.n === 1 ? "" : "s"}`, email, email);
+        return json({ ok: true, devices: n.n });
+      }
+
+      /* ---------- activity log ---------- */
+      if (path === "/api/activity" && method === "GET") {
+        if (!isStaff) return fail(403, "Not allowed");
+        const who = url.searchParams.get("email") || "";
+        const kind = url.searchParams.get("kind") || "";
+        const target = url.searchParams.get("target") || "";
+        const before = +url.searchParams.get("before") || 0;
+        const limit = clamp(+url.searchParams.get("limit") || 60, 1, 200);
+        // Secretaries only see the history of clients and invoices; the full log is the owner's.
+        if (!isOwner && !target) return fail(403, "Owner only");
+        const where = [], args = [];
+        if (who) { where.push("email=?"); args.push(normEmail(who)); }
+        if (kind) { where.push("kind=?"); args.push(kind); }
+        if (target) { where.push("target=?"); args.push(target); }
+        if (before) { where.push("id<?"); args.push(before); }
+        if (!isOwner) where.push("kind IN ('client','invoice','file')");
+        const { results } = await env.DB.prepare(
+          `SELECT id,at,email,kind,action,target,target_name AS targetName,summary FROM activity ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY id DESC LIMIT ?`
+        ).bind(...args, limit).all();
+        return json(results);
+      }
+
       const um = path.match(/^\/api\/users\/([^/]+)$/);
       if (um) {
         if (!isOwner) return fail(403, "Owner only");
@@ -351,6 +457,7 @@ export default {
               env.DB.prepare("UPDATE users SET pw_hash=?, pw_salt=?, must_change=1, failed=0, locked_until=0 WHERE email=?").bind(hash, salt, email),
               env.DB.prepare("DELETE FROM sessions WHERE email=?").bind(email),
             ]);
+            await logActivity(env, me.email, "team", "password_reset", `reset the password for ${u.name || email}`, email, u.name || email);
             return json({ ok: true, username: email, tempPassword: temp });
           }
           const role = b.role === undefined ? u.role : b.role;
@@ -360,6 +467,7 @@ export default {
           if ((isMain || email === me.email) && role !== "owner") return fail(400, isMain ? "The main owner must stay an owner" : "You can't remove your own owner role");
           const name = b.name === undefined ? u.name : String(b.name).trim().slice(0, 80);
           await env.DB.prepare("UPDATE users SET role=?, name=? WHERE email=?").bind(role, name, email).run();
+          if (role !== u.role) await logActivity(env, me.email, "team", "role", `changed ${u.name || email} from ${ROLE_NAMES[u.role]} to ${ROLE_NAMES[role]}`, email, u.name || email);
           return json({ ok: true });
         }
         if (method === "DELETE") {
@@ -369,6 +477,7 @@ export default {
             env.DB.prepare("DELETE FROM login_codes WHERE email=?").bind(email),
             env.DB.prepare("DELETE FROM users WHERE email=?").bind(email),
           ]);
+          await logActivity(env, me.email, "team", "user_remove", `removed ${u.name || email} from the team`, email, u.name || email);
           return json({ ok: true });
         }
       }
@@ -417,6 +526,7 @@ export default {
             stmts.push(env.DB.prepare("INSERT INTO files (id,client_id,kind,name,mime,size,data,created_by) VALUES (?,?,?,?,?,?,?,?)")
               .bind(fid, id, kind, name, mime, buf.byteLength, buf, me.email));
             await env.DB.batch(stmts);
+            await logActivity(env, me.email, "file", "upload", `added ${kind === "photo" ? "a photo" : kind === "cv" ? "a CV" : `the document "${name}"`} to {client}`, c.id, c.name);
             return json({ id: fid });
           }
           return fail(405, "Method not allowed");
@@ -424,10 +534,12 @@ export default {
 
         if (method === "DELETE") {
           if (!isOwner) return fail(403, "Only the owner can delete a client");
+          const gone = await loadClient(id);
           await env.DB.batch([
             env.DB.prepare("DELETE FROM clients WHERE id=?").bind(id),
             env.DB.prepare("DELETE FROM files WHERE client_id=?").bind(id),
           ]);
+          if (gone) await logActivity(env, me.email, "client", "client_delete", "deleted the client {client}", id, gone.name);
           return json({ ok: true });
         }
         if (method === "PUT" || method === "PATCH") {
@@ -455,6 +567,9 @@ export default {
             "INSERT INTO clients (id,name,stage,data,updated_at,updated_by) VALUES (?,?,?,?,datetime('now'),?) " +
             "ON CONFLICT(id) DO UPDATE SET name=excluded.name,stage=excluded.stage,data=excluded.data,updated_at=excluded.updated_at,updated_by=excluded.updated_by"
           ).bind(id, String(next.name).trim(), next.stage, JSON.stringify(next), me.email).run();
+          const cname = String(next.name).trim();
+          if (!cur) await logActivity(env, me.email, "client", "client_add", isSales ? "registered a new client, {client}" : "added the client {client}", id, cname);
+          else for (const [action, text] of describeClientChange(cur, next).slice(0, 8)) await logActivity(env, me.email, "client", action, text, id, cname);
           return json({ ok: true });
         }
       }
@@ -480,6 +595,7 @@ export default {
         }
         if (method === "DELETE") {
           await env.DB.prepare("DELETE FROM files WHERE id=?").bind(fm[1]).run();
+          await logActivity(env, me.email, "file", "file_remove", `removed ${meta.kind === "photo" ? "a photo" : meta.kind === "cv" ? "the CV" : `the document "${meta.name}"`} from {client}`, c.id, c.name);
           return json({ ok: true });
         }
       }
@@ -503,6 +619,7 @@ export default {
             try {
               await env.DB.prepare("INSERT INTO invoices (id,number,client_id,status,data,created_by,updated_by) VALUES (?,?,?,?,?,?,?)")
                 .bind(id, m.n, c.id, "draft", JSON.stringify(data), me.email, me.email).run();
+              await logActivity(env, me.email, "invoice", "invoice_add", `created invoice no. ${m.n} for {client}`, c.id, c.name);
               return json({ id, number: m.n });
             } catch (e) { if (!String(e.message).includes("UNIQUE")) throw e; }
           }
@@ -521,11 +638,22 @@ export default {
             const data = cleanInvoice({ ...cur, ...b });
             await env.DB.prepare("UPDATE invoices SET status=?, data=?, client_id=?, updated_at=datetime('now'), updated_by=? WHERE id=?")
               .bind(status, JSON.stringify(data), data.clientId || row.client_id, me.email, row.id).run();
+            const who = data.billTo?.name || "";
+            const kes = (n) => "KES " + Math.round(+n || 0).toLocaleString("en-KE");
+            const lines = [];
+            if (status !== row.status) lines.push(["invoice_" + status, status === "sent" ? `marked invoice no. ${row.number} as sent to {client}` : status === "void" ? `voided invoice no. ${row.number} for {client}` : `moved invoice no. ${row.number} for {client} back to draft`]);
+            const before = new Set((cur.receipts || []).map((p) => p.id));
+            for (const p of data.receipts) if (!before.has(p.id)) lines.push(["invoice_payment", `recorded ${kes(p.amount)} received${p.method ? " by " + p.method : ""} on invoice no. ${row.number} for {client}`]);
+            if (data.receipts.length < (cur.receipts || []).length) lines.push(["invoice_payment_remove", `removed a payment from invoice no. ${row.number} for {client}`]);
+            if (!lines.length && JSON.stringify(cur.items) !== JSON.stringify(data.items)) lines.push(["invoice_edit", `edited invoice no. ${row.number} for {client}`]);
+            // Invoice events are filed under the client, so they show in the client's history.
+            for (const [a, t] of lines) await logActivity(env, me.email, "invoice", a, t, data.clientId || row.client_id, who);
             return json({ ok: true });
           }
           if (method === "DELETE") {
             if (!isOwner && row.status !== "draft") return fail(403, "Only drafts can be deleted. Void the invoice instead.");
             await env.DB.prepare("DELETE FROM invoices WHERE id=?").bind(row.id).run();
+            await logActivity(env, me.email, "invoice", "invoice_delete", `deleted invoice no. ${row.number} for {client}`, row.client_id, JSON.parse(row.data).billTo?.name || "");
             return json({ ok: true });
           }
         }
@@ -544,6 +672,7 @@ export default {
           const stmts = SETTINGS.filter((k) => b[k] !== undefined).map((k) =>
             env.DB.prepare("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(k, String(b[k]).slice(0, 2000)));
           if (stmts.length) await env.DB.batch(stmts);
+          if (stmts.length) await logActivity(env, me.email, "settings", "settings", "changed company settings");
           return json({ ok: true });
         }
       }
@@ -559,6 +688,7 @@ export default {
 
 /* ---------- helpers for roles, files and invoices ---------- */
 const ROLES = ["owner", "secretary", "sales"];
+const ROLE_NAMES = { owner: "Owner", secretary: "Secretary", sales: "Sales rep" };
 // Fields a sales rep may see and edit on their own clients. Money, tasks and internal notes stay with the office.
 const SALES_FIELDS = ["name", "org", "title", "type", "phone", "email", "whatsapp", "location", "about", "budget", "links", "domain", "source", "repNotes"];
 const SALES_VIEW = [...SALES_FIELDS, "id", "stage", "rep", "createdBy", "created", "updated", "updatedBy"];

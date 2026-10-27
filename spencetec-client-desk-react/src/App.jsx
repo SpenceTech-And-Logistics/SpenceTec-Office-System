@@ -15,6 +15,7 @@ import InvoiceEdit from "./pages/InvoiceEdit.jsx";
 import Register from "./pages/Register.jsx";
 import SalesHome from "./pages/SalesHome.jsx";
 import Settings from "./pages/Settings.jsx";
+import Activity from "./pages/Activity.jsx";
 import Team from "./pages/Team.jsx";
 
 export default function App() {
@@ -52,7 +53,7 @@ function Shell() {
   const late = isSales ? 0 : clients.reduce((a, c) => a + overdue(c).length, 0);
 
   const base = isSales ? SALES_NAV : STAFF_NAV;
-  const nav = isOwner ? [...base, ["/team", "Team", "team"], ["/settings", "Settings", "gear"]] : base;
+  const nav = isOwner ? [...base, ["/team", "Team", "team"], ["/activity", "Activity", "chat"], ["/settings", "Settings", "gear"]] : base;
   const active = (to) => {
     if (to === "/") return path === "/";
     if (to === "/clients") return path === "/clients" || (path.startsWith("/clients/") && path !== "/clients/new");
@@ -90,6 +91,7 @@ function Shell() {
   else if (path === "/payments") page = <Payments />;
   else if (path === "/team") page = <Team />;
   else if (path === "/settings") page = <Settings />;
+  else if (path === "/activity") page = <Activity />;
   else page = <NotFound />;
 
   const display = me.name && me.name !== "Owner" ? me.name : me.email.split("@")[0];
@@ -127,6 +129,7 @@ function Shell() {
               <div className="menu" role="menu">
                 <span className="menu-who">{usesPassword ? `${me.name || me.email} (${me.email})` : me.email} · {roleName(me.role)}</span>
                 {isOwner && <Link to="/team" role="menuitem"><Icon name="team" />Team and roles</Link>}
+                {isOwner && <Link to="/activity" role="menuitem"><Icon name="chat" />Activity</Link>}
                 {isOwner && <Link to="/settings" role="menuitem"><Icon name="gear" />Company settings</Link>}
                 {usesPassword && <button role="menuitem" onClick={() => { setMenu(false); setPwOpen(true); }}><Icon name="gear" />Change password</button>}
                 <button role="menuitem" onClick={signOut}><Icon name="out" />Sign out</button>

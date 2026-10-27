@@ -39,7 +39,9 @@ export const api = {
   settings: () => req("GET", "/api/settings"),
   saveSettings: (data) => req("PUT", "/api/settings", data),
 
-  users: () => req("GET", "/api/users"),
+  users: (poll) => req("GET", "/api/users", null, null, poll),
+  signOutUser: (email) => req("POST", `/api/users/${e(email)}/signout`),
+  activity: (params = {}) => req("GET", "/api/activity?" + new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString(), null, null, true),
   addUser: (email, name, role) => req("POST", "/api/users", { email, name, role }),
   addUsername: (username, name) => req("POST", "/api/users", { username, name }),
   resetPassword: (id) => req("PATCH", `/api/users/${e(id)}`, { resetPassword: true }),
