@@ -76,13 +76,18 @@ export const LINK_TYPES = ["Website", "Facebook", "X (Twitter)", "Instagram", "L
 
 /* ---------- invoices ---------- */
 export function invTotals(inv) {
-  const sub = (inv.items || []).reduce((a, i) => a + (+i.qty || 0) * (+i.price || 0), 0);
+  // Monthly lines are shown on the invoice but billed separately, so they're not in the total.
+  const lineAmt = (i) => (+i.qty || 0) * (+i.price || 0);
+  const sub = (inv.items || []).filter((i) => !i.monthly).reduce((a, i) => a + lineAmt(i), 0);
+  const monthly = (inv.items || []).filter((i) => i.monthly).reduce((a, i) => a + lineAmt(i), 0);
   const disc = Math.min(+inv.discount || 0, sub);
   const net = sub - disc;
   const vat = inv.vat ? Math.round(net * (+inv.vatRate || 0)) / 100 : 0;
   const total = net + vat;
   const paidAmt = (inv.receipts || []).reduce((a, p) => a + (+p.amount || 0), 0);
-  return { sub, disc, net, vat, total, paid: paidAmt, balance: Math.max(total - paidAmt, 0) };
+  const pct = Math.min(100, Math.max(0, +inv.depositPct || 0));
+  const deposit = pct ? Math.round((total * pct) / 100) : 0;
+  return { sub, disc, net, vat, total, monthly, pct, deposit, onCompletion: total - deposit, paid: paidAmt, balance: Math.max(total - paidAmt, 0) };
 }
 export function invStatus(inv) {
   if (inv.status === "void") return "void";
@@ -97,7 +102,32 @@ export const INV_STATUS = {
   draft: ["Draft", ""], sent: ["Unpaid", "warn"], partial: ["Part paid", "warn"],
   overdue: ["Overdue", "bad"], paid: ["Paid", "ok"], void: ["Void", ""],
 };
-export const invNo = (inv, settings) => (settings?.invoicePrefix ?? "SPT-") + String(inv.number || 0).padStart(4, "0");
+export const invNo = (inv, settings) => (settings?.invoicePrefix ?? "INV-") + String(inv.number || 0).padStart(+(settings?.invoicePad || 3), "0");
+// "{deposit}" and "{balance}" in payment terms become the percentages.
+export const NO_DEPOSIT_TERMS = "Payment is due in full by the due date shown above.";
+export const fillTerms = (text, pct) => {
+  const t = String(text || "");
+  // Deposit wording makes no sense without a deposit, so fall back to plain terms.
+  if (!pct && t.includes("{deposit}")) return NO_DEPOSIT_TERMS;
+  return t.replaceAll("{deposit}", pct).replaceAll("{balance}", 100 - pct);
+};
+export const DEFAULT_TERMS = "A {deposit}% deposit of the agreed fee is payable before work begins. The remaining {balance}% is due on completion. Monthly website updates are optional and billed separately at the agreed monthly rate.";
+
+/* Starting points for new invoices, based on SpenceTec's own invoices. Prices are left for you to fill in. */
+export const INVOICE_TEMPLATES = [
+  { key: "portfolio", name: "Web portfolio page", depositPct: 75,
+    items: [{ desc: "Preparation of a web portfolio page, as agreed", qty: 1, price: "" },
+            { desc: "Monthly website updates (additional recurring charge)", qty: 1, price: 10000, monthly: true }],
+    notes: "Monthly updates are charged separately from the web portfolio preparation fee." },
+  { key: "multipage", name: "Multi-page website", depositPct: 75,
+    items: [{ desc: "Design and build of a multi-page website, as agreed", qty: 1, price: "" },
+            { desc: "Domain and hosting, first year", qty: 1, price: "" },
+            { desc: "Monthly website updates (additional recurring charge)", qty: 1, price: 10000, monthly: true }],
+    notes: "Monthly updates are charged separately from the website fee." },
+  { key: "updates", name: "Monthly updates only", depositPct: 0,
+    items: [{ desc: "Monthly website updates", qty: 1, price: 10000 }], notes: "" },
+  { key: "blank", name: "Blank invoice", depositPct: 0, items: [{ desc: "", qty: 1, price: "" }], notes: "" },
+];
 export const invOwed = (invoices) => invoices.filter((i) => ["sent", "partial", "overdue"].includes(invStatus(i))).reduce((a, i) => a + invTotals(i).balance, 0);
 export const PAY_METHODS = ["M-Pesa", "Bank transfer", "Cash", "Cheque", "Card"];
 
