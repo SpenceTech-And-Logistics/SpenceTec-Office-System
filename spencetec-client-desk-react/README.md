@@ -13,6 +13,16 @@ Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `set
 
 Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
 
+## Invoice template (v4.4)
+Invoices now match SpenceTec's own design: the logo across the top, a Bill from / Bill to panel, a navy line table, a fee / deposit / balance summary, payment details, payment terms and a closing line.
+- **Start from** a template when creating an invoice: Web portfolio page, Multi-page website, Monthly updates only, or Blank.
+- **Monthly** lines (e.g. website updates) show as "/mo" but aren't added to the total.
+- **Deposit %** splits the total into "Deposit payable" and "Balance on completion" (default 75/25).
+- Numbering continues from your Word invoices: INV-006, INV-007… (Settings → Invoice template).
+- Payment details, default terms (with {deposit}/{balance}) and the closing line are set in Settings.
+- The logo lives at `public/invoice-logo.png`; replace that file to change it.
+- Migration `0006_invoice_template.sql` fills in your company and payment details only where they were empty.
+
 ## Online status and activity log (v4.3)
 - **Team** shows a dot for each person: green *Online now* (active in the last 3 minutes), amber *Idle* (signed in but quiet), grey *Offline · last active …*. Background refreshes don't count as activity; mouse, keys and scrolling do.
 - **Activity** (owner only, in the sidebar) lists who did what: sign-ins and sign-outs, time-outs, lockouts, clients added and edited, stage moves, tasks, payments, invoices, files, team and settings changes. Filter by type or person. Kept for 180 days.

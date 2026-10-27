@@ -4,6 +4,8 @@
   "compatibility_date": "2025-10-01",
   // Keep the custom domain in the config so every deploy keeps it attached.
   "routes": [{ "pattern": "desk.spencetec.com", "custom_domain": true }],
+  // Don't wipe variables added in the Cloudflare dashboard when deploying.
+  "keep_vars": true,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
