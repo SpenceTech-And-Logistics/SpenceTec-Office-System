@@ -2,6 +2,8 @@
   "name": "spencetec-office-system",
   "main": "worker/index.js",
   "compatibility_date": "2025-10-01",
+  // Keep the custom domain in the config so every deploy keeps it attached.
+  "routes": [{ "pattern": "desk.spencetec.com", "custom_domain": true }],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
