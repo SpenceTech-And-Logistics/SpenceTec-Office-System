@@ -615,7 +615,9 @@ export default {
           const id = "inv-" + randomToken().slice(0, 12);
           const data = cleanInvoice(b);
           for (let tries = 0; tries < 3; tries++) {
-            const m = await env.DB.prepare("SELECT COALESCE(MAX(number),0)+1 n FROM invoices").first();
+            // Numbers continue from the last invoice, and never go below the "next invoice number" setting.
+            const m = await env.DB.prepare(
+              "SELECT MAX(COALESCE((SELECT MAX(number) FROM invoices),0)+1, COALESCE((SELECT CAST(value AS INTEGER) FROM settings WHERE key='invoiceStart'),1)) n").first();
             try {
               await env.DB.prepare("INSERT INTO invoices (id,number,client_id,status,data,created_by,updated_by) VALUES (?,?,?,?,?,?,?)")
                 .bind(id, m.n, c.id, "draft", JSON.stringify(data), me.email, me.email).run();
@@ -696,7 +698,7 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const DOC_TYPES = [...IMAGE_TYPES, "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
 const MAX_FILE = 1900000;
 const MAX_PHOTOS = 12;
-const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "vatRate", "payInstructions", "footer", "idleMinutes", "maxHours"];
+const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "invoicePad", "invoiceStart", "depositPct", "terms", "vatRate", "payInstructions", "footer", "idleMinutes", "maxHours"];
 
 const ownsClient = (c, email) => c.rep === email || c.createdBy === email;
 const salesView = (c) => Object.fromEntries(Object.entries(c).filter(([k]) => SALES_VIEW.includes(k)));
@@ -716,7 +718,10 @@ function cleanInvoice(b) {
     issueDate: date(b.issueDate),
     dueDate: date(b.dueDate),
     billTo: { name: str(b.billTo?.name, 120), email: str(b.billTo?.email, 120), phone: str(b.billTo?.phone, 40), address: str(b.billTo?.address, 300) },
-    items: (Array.isArray(b.items) ? b.items : []).slice(0, 50).map((i) => ({ id: str(i.id, 20), desc: str(i.desc, 300), qty: num(i.qty), price: num(i.price) })),
+    // monthly = recurring charge shown on the invoice but billed separately (not in the total).
+    items: (Array.isArray(b.items) ? b.items : []).slice(0, 50).map((i) => ({ id: str(i.id, 20), desc: str(i.desc, 300), qty: num(i.qty), price: num(i.price), monthly: !!i.monthly })),
+    depositPct: Math.min(100, Math.max(0, num(b.depositPct ?? 0))),
+    terms: str(b.terms, 2000),
     vat: !!b.vat,
     vatRate: num(b.vatRate ?? 16),
     discount: Math.max(0, num(b.discount)),

@@ -2,15 +2,19 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useDesk } from "../desk.jsx";
 import { Empty, PageHead } from "../ui.jsx";
+import { DEFAULT_TERMS, fillTerms, invNo } from "../util.js";
 
 const FIELDS = [
   ["company", "Company name", "SpenceTec and Logistics Limited"],
-  ["address", "Address", "Nairobi, Kenya"],
+  ["address", "Address", "P.O. Box 7183-00200, Nairobi"],
   ["phone", "Phone", "+254…"],
-  ["email", "Email", "accounts@spencetec.com"],
-  ["kraPin", "KRA PIN", "P05…"],
-  ["invoicePrefix", "Invoice number prefix", "SPT-"],
-  ["vatRate", "Default VAT rate (%)", "16"],
+  ["email", "Email", "info@spencetec.com"],
+  ["kraPin", "KRA PIN (optional)", "P05…"],
+];
+const NUMBERING = [
+  ["invoicePrefix", "Prefix", "INV-"],
+  ["invoicePad", "Digits", "3"],
+  ["invoiceStart", "Next number at least", "6"],
 ];
 
 export default function Settings() {
@@ -38,10 +42,20 @@ export default function Settings() {
           </div>
         </section>
         <section className="card-p">
-          <div className="ch"><h2>On the invoice</h2></div>
-          <label>How to pay<textarea rows="6" value={f.payInstructions || ""} onChange={set("payInstructions")}
-            placeholder={"M-Pesa Paybill: 000000\nAccount: invoice number\n\nBank: …\nAccount name: SpenceTec and Logistics Limited\nAccount number: …"} /></label>
-          <label>Footer line<input value={f.footer || ""} onChange={set("footer")} placeholder="Thank you for your business." /></label>
+          <div className="ch"><h2>Invoice template</h2></div>
+          <div className="fields three">
+            {NUMBERING.map(([k, l, ph]) => <label key={k}>{l}<input value={f[k] ?? ""} placeholder={ph} onChange={set(k)} /></label>)}
+          </div>
+          <p className="small">Next invoice looks like <b>{invNo({ number: Math.max(+f.invoiceStart || 1, 1) }, f)}</b> (or the number after your latest invoice, whichever is higher).</p>
+          <div className="fields">
+            <label>Default deposit (%)<input type="number" min="0" max="100" value={f.depositPct ?? 75} onChange={set("depositPct")} /></label>
+            <label>Default VAT rate (%)<input type="number" min="0" max="100" value={f.vatRate ?? 16} onChange={set("vatRate")} /></label>
+          </div>
+          <label>Payment details<textarea rows="5" value={f.payInstructions || ""} onChange={set("payInstructions")}
+            placeholder={"M-Pesa: 07…\nBank: …\nAccount name: …\nAccount / reference number: …"} /></label>
+          <label>Default payment terms<textarea rows="4" value={f.terms ?? ""} placeholder={DEFAULT_TERMS} onChange={set("terms")} /></label>
+          <p className="small">Preview: {fillTerms(f.terms || DEFAULT_TERMS, +f.depositPct || 75)}</p>
+          <label>Closing line<input value={f.footer || ""} onChange={set("footer")} placeholder="Thank you for your business." /></label>
           <button className="btn primary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button>
         </section>
         <section className="card-p">

@@ -3,14 +3,14 @@ import { api } from "../api.js";
 import { useDesk } from "../desk.jsx";
 import { Link, navigate, useLocation } from "../router.jsx";
 import { ClientSelect, Empty, Icon, InvPill, PageHead } from "../ui.jsx";
-import { kes, uid, today, daysFromNow, invTotals, invStatus, invNo, fmtDate, PAY_METHODS } from "../util.js";
+import { kes, uid, today, daysFromNow, invTotals, invStatus, invNo, fmtDate, PAY_METHODS, fillTerms, DEFAULT_TERMS, INVOICE_TEMPLATES } from "../util.js";
 
 const billToOf = (c) => c ? { name: c.name || "", email: c.email || "", phone: c.phone || "", address: [c.title, c.org, c.location].filter(Boolean).join(", ") } : { name: "", email: "", phone: "", address: "" };
 const blankItem = () => ({ id: uid(), desc: "", qty: 1, price: "" });
 const strip = (inv) => { const { id, number, status, created, createdBy, updated, updatedBy, ...rest } = inv; return rest; };
 // Compare what matters, ignoring key order and number-vs-text differences from the form.
 const norm = (x) => JSON.stringify([x.clientId, x.issueDate, x.dueDate, x.billTo?.name, x.billTo?.email, x.billTo?.phone, x.billTo?.address,
-  (x.items || []).map((i) => [i.desc, +i.qty || 0, +i.price || 0]), !!x.vat, +x.vatRate || 0, +x.discount || 0, x.notes || ""]);
+  (x.items || []).map((i) => [i.desc, +i.qty || 0, +i.price || 0, !!i.monthly]), !!x.vat, +x.vatRate || 0, +x.discount || 0, x.notes || "", +x.depositPct || 0, x.terms || ""]);
 
 export default function InvoiceEdit({ id }) {
   const { invoices, clients, settings, loaded, refresh, patchInvoice, toast, isOwner } = useDesk();
@@ -18,10 +18,17 @@ export default function InvoiceEdit({ id }) {
   const isNew = id === "new";
   const saved = isNew ? null : invoices.find((i) => i.id === id);
 
+  const fromTemplate = (key) => {
+    const tpl = INVOICE_TEMPLATES.find((x) => x.key === key) || INVOICE_TEMPLATES[0];
+    return { items: tpl.items.map((i) => ({ ...i, id: uid() })), depositPct: tpl.depositPct, notes: tpl.notes };
+  };
   const fresh = () => {
     const c = clients.find((x) => x.id === query.get("client"));
-    return { clientId: c?.id || "", issueDate: today(), dueDate: daysFromNow(14), billTo: billToOf(c), items: [blankItem()], vat: false, vatRate: +(settings.vatRate || 16), discount: 0, notes: "", receipts: [] };
+    const pct = settings.depositPct !== undefined && settings.depositPct !== "" ? +settings.depositPct : 75;
+    return { clientId: c?.id || "", issueDate: today(), dueDate: daysFromNow(14), billTo: billToOf(c), vat: false, vatRate: +(settings.vatRate || 16), discount: 0,
+      receipts: [], terms: settings.terms || DEFAULT_TERMS, ...fromTemplate("portfolio"), depositPct: pct };
   };
+  const [tpl, setTpl] = useState("portfolio");
   const [f, setF] = useState(() => (saved ? strip(saved) : fresh()));
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState("");
@@ -41,7 +48,7 @@ export default function InvoiceEdit({ id }) {
   const pickClient = (cid) => setF((x) => ({ ...x, clientId: cid, billTo: billToOf(clients.find((c) => c.id === cid)) }));
 
   function clean() {
-    return { ...f, items: f.items.filter((i) => i.desc.trim() || +i.price).map((i) => ({ ...i, qty: +i.qty || 0, price: +i.price || 0 })) };
+    return { ...f, items: f.items.filter((i) => i.desc.trim() || +i.price).map((i) => ({ ...i, qty: +i.qty || 0, price: +i.price || 0, monthly: !!i.monthly })) };
   }
   async function save(extra = {}, msg = "Invoice saved") {
     if (!f.clientId) { toast("Choose a client first", "bad"); return false; }
@@ -84,7 +91,7 @@ export default function InvoiceEdit({ id }) {
   const mail = (() => {
     const to = f.billTo?.email;
     if (!to || isNew) return "";
-    const body = `Dear ${f.billTo.name},\n\nPlease find invoice ${number} for ${kes(t.total)}${f.dueDate ? `, due on ${fmtDate(f.dueDate)}` : ""}.\n${t.paid ? `Amount paid so far: ${kes(t.paid)}. Balance: ${kes(t.balance)}.\n` : ""}${settings.payInstructions ? `\nHow to pay:\n${settings.payInstructions}\n` : ""}\nThank you,\n${settings.company || "SpenceTec and Logistics Limited"}`;
+    const body = `Dear ${f.billTo.name},\n\nPlease find invoice ${number} for ${kes(t.total)}${f.dueDate ? `, due on ${fmtDate(f.dueDate)}` : ""}.\n${t.pct && !t.paid ? `Deposit payable now (${t.pct}%): ${kes(t.deposit)}. Balance on completion: ${kes(t.onCompletion)}.\n` : ""}${t.paid ? `Amount paid so far: ${kes(t.paid)}. Balance: ${kes(t.balance)}.\n` : ""}${settings.payInstructions ? `\nPayment details:\n${settings.payInstructions}\n` : ""}\nThank you for your business,\n${settings.company || "SpenceTec and Logistics Limited"}`;
     return `mailto:${to}?subject=${encodeURIComponent(`Invoice ${number} from ${settings.company || "SpenceTec and Logistics Limited"}`)}&body=${encodeURIComponent(body)}`;
   })();
 
@@ -99,6 +106,21 @@ export default function InvoiceEdit({ id }) {
 
       <div className="inv-layout">
         <div className="stack no-print">
+          {isNew && (
+            <section className="card-p">
+              <div className="ch"><h2>Start from</h2></div>
+              <div className="tpl-pick" role="group" aria-label="Invoice template">
+                {INVOICE_TEMPLATES.map((x) => (
+                  <button key={x.key} type="button" aria-pressed={tpl === x.key}
+                    onClick={() => { setTpl(x.key); setF((cur) => ({ ...cur, ...fromTemplate(x.key) })); }}>
+                    <b>{x.name}</b>
+                    <small>{x.depositPct ? `${x.depositPct}% deposit · ` : ""}{x.items.length} line{x.items.length === 1 ? "" : "s"}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section className="card-p">
             <div className="ch"><h2>Client</h2></div>
             <ClientSelect value={f.clientId} onChange={pickClient} clients={clients} />
@@ -115,22 +137,30 @@ export default function InvoiceEdit({ id }) {
           <section className="card-p">
             <div className="ch"><h2>Lines</h2></div>
             <div className="lines">
-              <div className="line head"><span>Description</span><span>Qty</span><span>Unit price</span><span /></div>
+              <div className="line head"><span>Description</span><span>Qty</span><span>Rate (KES)</span><span title="Shown on the invoice but billed separately each month">Monthly</span><span /></div>
               {f.items.map((i) => (
                 <div className="line" key={i.id}>
                   <input value={i.desc} placeholder="e.g. Website design and build" aria-label="Description" onChange={(e) => setItem(i.id, "desc", e.target.value)} />
                   <input type="number" min="0" step="any" value={i.qty} aria-label="Quantity" onChange={(e) => setItem(i.id, "qty", e.target.value)} />
-                  <input type="number" min="0" step="any" value={i.price} placeholder="KES" aria-label="Unit price" onChange={(e) => setItem(i.id, "price", e.target.value)} />
+                  <input type="number" min="0" step="any" value={i.price} placeholder="KES" aria-label="Rate" onChange={(e) => setItem(i.id, "price", e.target.value)} />
+                  <label className="mono" title="Monthly charge: shown on the invoice but billed separately, not added to the total">
+                    <input type="checkbox" checked={!!i.monthly} aria-label="Monthly, billed separately" onChange={(e) => setItem(i.id, "monthly", e.target.checked)} />
+                  </label>
                   <button type="button" className="icon-btn" aria-label="Remove line" disabled={f.items.length === 1} onClick={() => set("items", f.items.filter((x) => x.id !== i.id))}><Icon name="x" size={15} /></button>
                 </div>
               ))}
             </div>
             <button type="button" className="linkbtn" onClick={() => set("items", [...f.items, blankItem()])}>+ Add line</button>
+            <p className="small">Tick <b>Monthly</b> for recurring charges like website updates. They show on the invoice as "/mo" but aren't added to this invoice's total.</p>
             <div className="fields">
+              <label>Deposit before work starts (%)<input type="number" min="0" max="100" value={f.depositPct ?? 0} onChange={(e) => set("depositPct", Math.min(100, Math.max(0, +e.target.value || 0)))} /></label>
+              <span className="small deposit-note">{t.pct ? <>Deposit <b>{kes(t.deposit)}</b>, balance on completion <b>{kes(t.onCompletion)}</b>.</> : "0 means the full amount is due at once."}</span>
               <label>Discount (KES)<input type="number" min="0" value={f.discount || ""} onChange={(e) => set("discount", +e.target.value || 0)} /></label>
               <label className="check"><input type="checkbox" checked={!!f.vat} onChange={(e) => set("vat", e.target.checked)} /> Add VAT at
                 <input className="rate" type="number" min="0" max="100" value={f.vatRate} onChange={(e) => set("vatRate", +e.target.value || 0)} />%</label>
-              <label className="full">Notes on the invoice<textarea value={f.notes} placeholder="e.g. 50% deposit before work starts, balance on launch." onChange={(e) => set("notes", e.target.value)} /></label>
+              <label className="full">Note under the lines<textarea rows="2" value={f.notes} placeholder="e.g. Monthly updates are charged separately from the preparation fee." onChange={(e) => set("notes", e.target.value)} /></label>
+              <label className="full">Payment terms<textarea rows="3" value={f.terms ?? ""} onChange={(e) => set("terms", e.target.value)} /></label>
+              <span className="small full">{"{deposit}"} and {"{balance}"} are replaced with the percentages. Default terms and payment details are set in Settings.</span>
             </div>
           </section>
 
@@ -203,46 +233,72 @@ function Receipts({ f, t, onAdd, onRemove }) {
 export function InvoiceDoc({ inv, number, t, st, settings }) {
   const s = settings || {};
   const lines = (inv.items || []).filter((i) => (i.desc || "").trim() || +i.price);
+  const company = s.company || "SpenceTec and Logistics Limited";
+  const terms = fillTerms(inv.terms ?? s.terms ?? "", t.pct);
+  const longDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "");
+  const money = (n) => Math.round(+n || 0).toLocaleString("en-KE");
   return (
     <article className="invoice-doc" aria-label="Invoice preview">
       {["paid", "void", "draft"].includes(st) && <span className={"stamp " + st}>{st}</span>}
-      <header>
-        <div>
-          <div className="co"><span className="logo">S</span><b>{s.company || "SpenceTec and Logistics Limited"}</b></div>
-          <p>{s.address}{s.phone ? <><br />{s.phone}</> : null}{s.email ? <><br />{s.email}</> : null}{s.kraPin ? <><br />KRA PIN {s.kraPin}</> : null}</p>
-        </div>
-        <div className="meta">
-          <h2>Invoice</h2>
-          <dl>
-            <dt>Number</dt><dd>{number}</dd>
-            <dt>Issued</dt><dd>{inv.issueDate ? fmtDate(inv.issueDate) : "—"}</dd>
-            <dt>Due</dt><dd>{inv.dueDate ? fmtDate(inv.dueDate) : "On receipt"}</dd>
-          </dl>
-        </div>
+      <div className="inv-logo"><img src="/invoice-logo.png" alt={company} /></div>
+
+      <header className="inv-head">
+        <h2>INVOICE</h2>
+        <dl>
+          <dt>Invoice No:</dt><dd>{number}</dd>
+          <dt>Date:</dt><dd>{longDate(inv.issueDate) || "—"}</dd>
+          {inv.dueDate && <><dt>Due Date:</dt><dd>{longDate(inv.dueDate)}</dd></>}
+        </dl>
       </header>
-      <section className="billto">
-        <small>Bill to</small>
-        <b>{inv.billTo?.name || "—"}</b>
-        <p>{[inv.billTo?.address, inv.billTo?.phone, inv.billTo?.email].filter(Boolean).map((x, i) => <React.Fragment key={i}>{x}<br /></React.Fragment>)}</p>
+
+      <section className="inv-parties">
+        <div>
+          <h3>Bill from</h3>
+          <p>{company}{s.address && <><br />Address: {s.address}</>}{s.phone && <><br />Phone: {s.phone}</>}{s.email && <><br />Email: {s.email}</>}{s.kraPin && <><br />KRA PIN: {s.kraPin}</>}</p>
+        </div>
+        <div>
+          <h3>Bill to</h3>
+          <p>Client: {inv.billTo?.name || "—"}
+            {inv.billTo?.address && <><br />{inv.billTo.address}</>}
+            {(inv.billTo?.phone || inv.billTo?.email) && <><br />Phone/Email: {[inv.billTo.phone, inv.billTo.email].filter(Boolean).join(" · ")}</>}
+          </p>
+        </div>
       </section>
-      <table>
-        <thead><tr><th>Description</th><th className="r">Qty</th><th className="r">Unit price</th><th className="r">Amount</th></tr></thead>
+
+      <table className="inv-lines">
+        <thead><tr><th>Description</th><th className="c">Qty</th><th className="r">Rate (KES)</th><th className="r">Amount (KES)</th></tr></thead>
         <tbody>
           {lines.length ? lines.map((i) => (
-            <tr key={i.id}><td>{i.desc}</td><td className="r">{+i.qty || 0}</td><td className="r">{kes(+i.price || 0)}</td><td className="r">{kes((+i.qty || 0) * (+i.price || 0))}</td></tr>
+            <tr key={i.id} className={i.monthly ? "monthly" : ""}>
+              <td>{i.desc}</td>
+              <td className="c">{+i.qty || 0}{i.monthly ? "/mo" : ""}</td>
+              <td className="r">{money(i.price)}</td>
+              <td className="r">{money((+i.qty || 0) * (+i.price || 0))}{i.monthly ? "/mo" : ""}</td>
+            </tr>
           )) : <tr><td colSpan="4" className="muted">No lines yet</td></tr>}
         </tbody>
       </table>
-      <dl className="totals">
-        <dt>Subtotal</dt><dd>{kes(t.sub)}</dd>
-        {t.disc > 0 && <><dt>Discount</dt><dd>−{kes(t.disc)}</dd></>}
-        {inv.vat && <><dt>VAT {inv.vatRate}%</dt><dd>{kes(t.vat)}</dd></>}
-        <dt className="grand">Total</dt><dd className="grand">{kes(t.total)}</dd>
-        {t.paid > 0 && <><dt>Paid</dt><dd>−{kes(t.paid)}</dd><dt className="grand">Balance due</dt><dd className="grand">{kes(t.balance)}</dd></>}
+      {inv.notes && <p className="inv-note">{inv.notes}</p>}
+
+      <dl className="inv-sum">
+        {(t.disc > 0 || inv.vat) && <><dt>Subtotal</dt><dd>KES {money(t.sub)}</dd></>}
+        {t.disc > 0 && <><dt>Discount</dt><dd>− KES {money(t.disc)}</dd></>}
+        {inv.vat && <><dt>VAT ({inv.vatRate}%)</dt><dd>KES {money(t.vat)}</dd></>}
+        <dt>{t.monthly ? "Total fee (excluding monthly charges)" : "Total fee"}</dt><dd>KES {money(t.total)}</dd>
+        {t.pct > 0 && t.pct < 100 && <>
+          <dt className="strong">Deposit payable ({t.pct}%)</dt><dd className="strong">KES {money(t.deposit)}</dd>
+          <dt className="strong">Balance on completion ({100 - t.pct}%)</dt><dd className="strong">KES {money(t.onCompletion)}</dd>
+        </>}
+        {t.paid > 0 && <>
+          <dt>Paid so far</dt><dd>− KES {money(t.paid)}</dd>
+          <dt className="due">Amount due</dt><dd className="due">KES {money(t.balance)}</dd>
+        </>}
+        {!t.pct && !t.paid && <><dt className="due">Amount due</dt><dd className="due">KES {money(t.total)}</dd></>}
       </dl>
-      {s.payInstructions && <section className="howto"><small>How to pay</small><p>{s.payInstructions}</p></section>}
-      {inv.notes && <section className="howto"><small>Notes</small><p>{inv.notes}</p></section>}
-      <footer>{s.footer}<br />{s.company || "SpenceTec and Logistics Limited"}</footer>
+
+      {s.payInstructions && <section className="inv-block"><h3>Payment details</h3><p>{s.payInstructions}</p></section>}
+      {terms && <section className="inv-block"><h3>Payment terms</h3><p>{terms}</p></section>}
+      <p className="inv-thanks">{s.footer || "Thank you for your business."}</p>
     </article>
   );
 }
