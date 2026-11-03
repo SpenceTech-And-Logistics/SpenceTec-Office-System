@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { useDesk } from "../desk.jsx";
 import { Link, navigate, useLocation } from "../router.jsx";
 import { ClientSelect, Empty, Icon, InvPill, PageHead, Seg } from "../ui.jsx";
-import { kes, uid, today, daysFromNow, invTotals, invStatus, invNo, fmtDate, PAY_METHODS, fillTerms, INVOICE_TEMPLATES, FREQS, FREQ_SUFFIX, freqOf, PAY_MODES, termsFor } from "../util.js";
+import { kes, uid, today, daysFromNow, invTotals, invStatus, invNo, fmtDate, PAY_METHODS, fillTerms, INVOICE_TEMPLATES, FREQS, FREQ_SUFFIX, freqOf, PAY_MODES, termsFor, receiptNo, STATUS_LABEL } from "../util.js";
 import { downloadInvoicePdf, invoiceFileName } from "../pdf.js";
 
 const billToOf = (c) => c ? { name: c.name || "", email: c.email || "", phone: c.phone || "", address: [c.title, c.org, c.location].filter(Boolean).join(", ") } : { name: "", email: "", phone: "", address: "" };
@@ -39,7 +39,14 @@ export default function InvoiceEdit({ id }) {
   useEffect(() => { if (saved) setF(strip(saved)); }, [saved?.id]); // eslint-disable-line
   useEffect(() => { if (isNew && !f.clientId && query.get("client") && clients.length) setF(fresh()); }, [clients.length]); // eslint-disable-line
 
-  const dirty = isNew || (saved && norm(saved) !== norm(f));
+  // Invoice number: type one (e.g. to enter older invoices) or leave it for the next one in line.
+  const nextNumber = Math.max(invoices.reduce((m, i) => Math.max(m, +i.number || 0), 0) + 1, +settings.invoiceStart || 1);
+  const [numText, setNumText] = useState(saved ? String(saved.number) : "");
+  useEffect(() => { if (saved) setNumText(String(saved.number)); }, [saved?.number]); // eslint-disable-line
+  const typedNumber = parseInt(String(numText).replace(/[^0-9]/g, ""), 10) || 0;
+  const numberTaken = typedNumber > 0 && invoices.some((i) => +i.number === typedNumber && i.id !== id);
+  const numberChanged = !isNew && saved && typedNumber > 0 && typedNumber !== +saved.number;
+  const dirty = isNew || (saved && (norm(saved) !== norm(f) || numberChanged));
   const t = invTotals(f);
   const doc = { ...(saved || { number: 0, status: "draft" }), ...f };
   const st = invStatus(doc);
@@ -56,7 +63,9 @@ export default function InvoiceEdit({ id }) {
   }
   async function save(extra = {}, msg = "Invoice saved") {
     if (!f.clientId) { toast("Choose a client first", "bad"); return false; }
+    if (numberTaken) { toast(`Invoice number ${typedNumber} is already used`, "bad"); return false; }
     const data = { ...clean(), ...extra };
+    if (isNew ? typedNumber > 0 : numberChanged) data.number = typedNumber;
     if (!data.items.length) { toast("Add at least one line", "bad"); return false; }
     setBusy(true);
     try {
@@ -103,6 +112,7 @@ export default function InvoiceEdit({ id }) {
   }
 
   const number = isNew ? "New invoice" : invNo(saved, settings);
+  const previewNumber = invNo({ number: typedNumber || (isNew ? nextNumber : saved?.number) }, settings);
   const mail = (() => {
     const to = f.billTo?.email;
     if (!to || isNew) return "";
@@ -145,6 +155,14 @@ export default function InvoiceEdit({ id }) {
               <label>Email<input type="email" value={f.billTo.email} onChange={(e) => set("billTo", { ...f.billTo, email: e.target.value })} /></label>
               <label>Phone<input value={f.billTo.phone} onChange={(e) => set("billTo", { ...f.billTo, phone: e.target.value })} /></label>
               <label>Address / office<input value={f.billTo.address} onChange={(e) => set("billTo", { ...f.billTo, address: e.target.value })} /></label>
+              <label>Invoice number
+                <span className="num-in">
+                  <span>{settings.invoicePrefix ?? "INV-"}</span>
+                  <input inputMode="numeric" value={numText} placeholder={String(nextNumber).padStart(+(settings.invoicePad || 3), "0")}
+                    onChange={(e) => setNumText(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))} aria-invalid={numberTaken || undefined} />
+                </span>
+                <small className={numberTaken ? "num-note bad" : "num-note"}>{numberTaken ? `${invNo({ number: typedNumber }, settings)} is already used` : isNew ? (typedNumber ? "You chose this number" : "Leave blank for the next number") : "Change it to fix a wrong number"}</small>
+              </label>
               <label>Issue date<input type="date" value={f.issueDate} onChange={(e) => set("issueDate", e.target.value)} /></label>
               <label>Due date<input type="date" value={f.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></label>
             </div>
@@ -230,17 +248,17 @@ export default function InvoiceEdit({ id }) {
           </section>
 
           {!isNew && saved.status !== "draft" && saved.status !== "void" && (
-            <Receipts f={f} t={t} onAdd={addReceipt} onRemove={removeReceipt} />
+            <Receipts f={f} t={t} onAdd={addReceipt} onRemove={removeReceipt} inv={saved} settings={settings} />
           )}
         </div>
 
-        <InvoiceDoc inv={doc} number={isNew ? "Draft" : number} t={t} st={st} settings={settings} />
+        <InvoiceDoc inv={doc} number={previewNumber} t={t} st={st} settings={settings} />
       </div>
     </>
   );
 }
 
-function Receipts({ f, t, onAdd, onRemove }) {
+function Receipts({ f, t, onAdd, onRemove, inv, settings }) {
   const [amt, setAmt] = useState("");
   const [date, setDate] = useState(today());
   const [method, setMethod] = useState("M-Pesa");
@@ -250,9 +268,10 @@ function Receipts({ f, t, onAdd, onRemove }) {
     <section className="card-p">
       <div className="ch"><h2>Payments received</h2><span className="count">{kes(t.paid)} of {kes(t.total)}</span></div>
       <div className="items">
-        {(f.receipts || []).map((p) => (
+        {(f.receipts || []).map((p, i) => (
           <div className="item" key={p.id}>
-            <span className="t"><span className="tt">{kes(p.amount)} · {p.method}</span><span className="meta"><span>{p.date ? fmtDate(p.date) : ""}</span>{p.ref && <span>Ref {p.ref}</span>}</span></span>
+            <span className="t"><span className="tt">{kes(p.amount)} · {p.method}</span><span className="meta"><span>{receiptNo(inv, settings, i)}</span><span>{p.date ? fmtDate(p.date) : ""}</span>{p.ref && <span>Ref {p.ref}</span>}</span></span>
+            <Link className="btn sm" to={`/invoices/${inv.id}/receipt/${p.id}`}><Icon name="file" size={14} />Receipt</Link>
             <button className="icon-btn" aria-label="Remove payment" onClick={() => onRemove(p.id)}><Icon name="x" size={15} /></button>
           </div>
         ))}
@@ -260,6 +279,7 @@ function Receipts({ f, t, onAdd, onRemove }) {
       </div>
       {t.balance > 0 && (
         <form className="receipt" onSubmit={(e) => { e.preventDefault(); if (!+amt) return; onAdd({ amount: +amt, date, method, ref: ref.trim() }); setRef(""); }}>
+          <p className="small full">Record money as it arrives. Each payment gets its own receipt to download or print.</p>
           <label>Amount<input type="number" min="0" step="any" value={amt} onChange={(e) => setAmt(e.target.value)} /></label>
           <label>Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
           <label>Method<select value={method} onChange={(e) => setMethod(e.target.value)}>{PAY_METHODS.map((m) => <option key={m}>{m}</option>)}</select></label>
@@ -281,11 +301,14 @@ export function InvoiceDoc({ inv, number, t, st, settings }) {
   const money = (n) => Math.round(+n || 0).toLocaleString("en-KE");
   return (
     <article className="invoice-doc" aria-label="Invoice preview">
-      {["paid", "void", "draft"].includes(st) && <span className={"stamp " + st}>{st}</span>}
+      {["void", "draft"].includes(st) && <span className={"stamp " + st}>{st}</span>}
       <div className="inv-logo"><img src="/invoice-logo.png" alt={company} /></div>
 
       <header className="inv-head">
-        <h2>INVOICE</h2>
+        <div>
+          <h2>INVOICE</h2>
+          {st !== "draft" && <span className={"inv-status s-" + st}>{STATUS_LABEL[st]}</span>}
+        </div>
         <dl>
           <dt>Invoice No:</dt><dd>{number}</dd>
           <dt>Date:</dt><dd>{longDate(inv.issueDate) || "—"}</dd>
@@ -329,7 +352,9 @@ export function InvoiceDoc({ inv, number, t, st, settings }) {
         <dt>{t.monthly || t.yearly ? "Total fee (excluding recurring charges)" : "Total fee"}</dt><dd>KES {money(t.total)}</dd>
         {t.paid > 0 ? <>
           <dt>Paid so far</dt><dd>− KES {money(t.paid)}</dd>
-          <dt className="due">Amount due</dt><dd className="due">KES {money(t.balance)}</dd>
+          {t.balance > 0
+            ? <><dt className="due">Amount due</dt><dd className="due">KES {money(t.balance)}</dd></>
+            : <><dt className="due paid">Paid in full</dt><dd className="due paid">KES 0</dd></>}
         </> : t.mode === "full" || !t.pct ? <>
           <dt className="due">Full payment due</dt><dd className="due">KES {money(t.total)}</dd>
         </> : t.mode === "either" ? <>
@@ -344,7 +369,19 @@ export function InvoiceDoc({ inv, number, t, st, settings }) {
         {t.yearly > 0 && <><dt className="rec">Yearly maintenance (billed separately)</dt><dd className="rec">KES {money(t.yearly)}/year</dd></>}
       </dl>
 
-      {payDetails && <section className="inv-block"><h3>Payment details</h3><p>{payDetails}</p></section>}
+      {(inv.receipts || []).length > 0 && (
+        <section className="inv-block">
+          <h3>Payments received</h3>
+          <table className="inv-paid">
+            <tbody>
+              {inv.receipts.map((p) => (
+                <tr key={p.id}><td>{longDate(p.date) || "—"}</td><td>{p.method}{p.ref ? ` · ${p.ref}` : ""}</td><td className="r">KES {money(p.amount)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+      {st !== "paid" && payDetails && <section className="inv-block"><h3>Payment details</h3><p>{payDetails}</p></section>}
       {terms && <section className="inv-block"><h3>Payment terms</h3><p>{terms}</p></section>}
       <p className="inv-thanks">{s.footer || "Thank you for your business."}</p>
     </article>
