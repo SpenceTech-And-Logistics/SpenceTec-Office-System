@@ -50,6 +50,8 @@ export default function Settings() {
           <div className="fields">
             <label>Default payment option<select value={f.payMode || "deposit"} onChange={set("payMode")}>{PAY_MODES.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
             <label>Default deposit (%)<input type="number" min="0" max="100" value={f.depositPct ?? 75} onChange={set("depositPct")} /></label>
+            <label>Due date on new invoices (days)<input type="number" min="0" max="365" value={f.dueDays ?? "14"} placeholder="No due date" onChange={set("dueDays")} />
+              <small className="num-note">Leave empty for no due date ("due on receipt").</small></label>
             <label>Default VAT rate (%)<input type="number" min="0" max="100" value={f.vatRate ?? 16} onChange={set("vatRate")} /></label>
           </div>
           <label>Default payment details (each invoice can change its own)<textarea rows="5" value={f.payInstructions || ""} onChange={set("payInstructions")}

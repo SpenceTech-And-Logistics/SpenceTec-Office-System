@@ -120,11 +120,21 @@ export const RECURRING_TERMS = "Monthly updates and yearly maintenance are bille
 // Default terms for each payment option (the deposit wording can be changed in Settings).
 export const termsFor = (mode, settings) =>
   mode === "full" ? NO_DEPOSIT_TERMS : mode === "either" ? EITHER_TERMS : settings?.terms || DEFAULT_TERMS;
-export const fillTerms = (text, pct) => {
-  const t = String(text || "");
+export const fillTerms = (text, pct, hasDueDate = true) => {
+  let t = String(text || "");
   // Deposit wording makes no sense without a deposit, so fall back to plain terms.
-  if (!pct && t.includes("{deposit}")) return NO_DEPOSIT_TERMS;
-  return t.replaceAll("{deposit}", pct).replaceAll("{balance}", 100 - pct);
+  if (!pct && t.includes("{deposit}")) t = NO_DEPOSIT_TERMS;
+  t = t.replaceAll("{deposit}", pct).replaceAll("{balance}", 100 - pct);
+  // Without a due date, "by the due date" becomes "on receipt of this invoice".
+  if (!hasDueDate) t = t.replace(/by the due date shown above/g, "on receipt of this invoice").replace(/by the due date/g, "on receipt of this invoice");
+  return t;
+};
+// Days until due on new invoices; blank in Settings means no due date.
+export const defaultDueDate = (settings) => {
+  const v = settings?.dueDays;
+  if (v === undefined || v === null) return daysFromNow(14);
+  if (String(v).trim() === "") return "";
+  return daysFromNow(Math.max(0, parseInt(v, 10) || 0));
 };
 export const DEFAULT_TERMS = "A {deposit}% deposit of the agreed fee is payable before work begins. The remaining {balance}% is due on completion. Monthly website updates are optional and billed separately at the agreed monthly rate.";
 
