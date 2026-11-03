@@ -614,6 +614,16 @@ export default {
           if (!c) return fail(400, "Client not found");
           const id = "inv-" + randomToken().slice(0, 12);
           const data = cleanInvoice(b);
+          // A number typed in by hand (e.g. to enter older invoices) is used as long as it's free.
+          if (b.number !== undefined && b.number !== null && b.number !== "") {
+            const n = parseInvoiceNumber(b.number);
+            if (!n) return fail(400, "Invoice numbers are whole numbers from 1 to 999999.");
+            if (await env.DB.prepare("SELECT 1 FROM invoices WHERE number=?").bind(n).first()) return fail(409, `Invoice number ${n} is already used.`);
+            await env.DB.prepare("INSERT INTO invoices (id,number,client_id,status,data,created_by,updated_by) VALUES (?,?,?,?,?,?,?)")
+              .bind(id, n, c.id, "draft", JSON.stringify(data), me.email, me.email).run();
+            await logActivity(env, me.email, "invoice", "invoice_add", `created invoice no. ${n} for {client}`, c.id, c.name);
+            return json({ id, number: n });
+          }
           for (let tries = 0; tries < 3; tries++) {
             // Numbers continue from the last invoice, and never go below the "next invoice number" setting.
             const m = await env.DB.prepare(
@@ -636,6 +646,14 @@ export default {
             const b = await readJson();
             const status = b.status === undefined ? row.status : b.status;
             if (!["draft", "sent", "void"].includes(status)) return fail(400, "Bad status");
+            if (b.number !== undefined && +b.number !== row.number) {
+              const n = parseInvoiceNumber(b.number);
+              if (!n) return fail(400, "Invoice numbers are whole numbers from 1 to 999999.");
+              if (await env.DB.prepare("SELECT 1 FROM invoices WHERE number=? AND id<>?").bind(n, row.id).first()) return fail(409, `Invoice number ${n} is already used.`);
+              await env.DB.prepare("UPDATE invoices SET number=? WHERE id=?").bind(n, row.id).run();
+              await logActivity(env, me.email, "invoice", "invoice_number", `changed invoice no. ${row.number} to no. ${n} for {client}`, row.client_id, JSON.parse(row.data).billTo?.name || "");
+            }
+            delete b.number;
             const cur = JSON.parse(row.data);
             const data = cleanInvoice({ ...cur, ...b });
             await env.DB.prepare("UPDATE invoices SET status=?, data=?, client_id=?, updated_at=datetime('now'), updated_by=? WHERE id=?")
@@ -708,6 +726,11 @@ function rowToInvoice(r) {
   let d = {};
   try { d = JSON.parse(r.data); } catch {}
   return { ...d, id: r.id, number: r.number, clientId: r.client_id, status: r.status, created: r.created_at, createdBy: r.created_by, updated: r.updated_at, updatedBy: r.updated_by };
+}
+// "INV-005", "005" or 5 -> 5
+function parseInvoiceNumber(v) {
+  const n = parseInt(String(v).replace(/[^0-9]/g, ""), 10);
+  return Number.isInteger(n) && n >= 1 && n <= 999999 ? n : 0;
 }
 function cleanInvoice(b) {
   const num = (v) => (Number.isFinite(+v) ? +v : 0);

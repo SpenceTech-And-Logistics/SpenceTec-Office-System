@@ -198,3 +198,28 @@ export function statusText(u) {
   if (u.status === "idle") return `Signed in, idle · active ${agoUnix(u.lastSeen)}`;
   return u.lastSeen ? `Offline · last active ${agoUnix(u.lastSeen)}` : "Never signed in";
 }
+
+/* ---------- receipts ---------- */
+// One receipt per payment received: RCT-006-1, RCT-006-2… (invoice number + payment number).
+export const receiptNo = (inv, settings, index) =>
+  "RCT-" + String(inv.number || 0).padStart(+(settings?.invoicePad || 3), "0") + "-" + (index + 1);
+export const STATUS_LABEL = { draft: "Draft", sent: "Unpaid", partial: "Partly paid", overdue: "Overdue", paid: "Paid", void: "Void" };
+
+// 22500 -> "Twenty-Two Thousand Five Hundred"
+const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+function under1000(n) {
+  const h = Math.floor(n / 100), r = n % 100;
+  const rest = r < 20 ? ONES[r] : TENS[Math.floor(r / 10)] + (r % 10 ? "-" + ONES[r % 10] : "");
+  return [h ? ONES[h] + " Hundred" : "", rest].filter(Boolean).join(h && rest ? " and " : "");
+}
+export function amountInWords(amount) {
+  let n = Math.round(+amount || 0);
+  if (!n) return "Kenya Shillings Zero Only";
+  const parts = [];
+  for (const [size, name] of [[1e9, "Billion"], [1e6, "Million"], [1e3, "Thousand"], [1, ""]]) {
+    const chunk = Math.floor(n / size);
+    if (chunk) { parts.push(under1000(chunk) + (name ? " " + name : "")); n -= chunk * size; }
+  }
+  return "Kenya Shillings " + parts.join(" ") + " Only";
+}

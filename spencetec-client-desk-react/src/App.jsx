@@ -12,6 +12,7 @@ import Tasks from "./pages/Tasks.jsx";
 import Payments from "./pages/Payments.jsx";
 import Invoices from "./pages/Invoices.jsx";
 import InvoiceEdit from "./pages/InvoiceEdit.jsx";
+import Receipt from "./pages/Receipt.jsx";
 import Register from "./pages/Register.jsx";
 import SalesHome from "./pages/SalesHome.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -80,6 +81,7 @@ function Shell() {
   let page;
   const m = path.match(/^\/clients\/([^/]+)$/);
   const im = path.match(/^\/invoices\/([^/]+)$/);
+  const rm = path.match(/^\/invoices\/([^/]+)\/receipt\/([^/]+)$/);
   if (path === "/clients/new") page = <Register />;
   else if (m) page = <ClientPage id={decodeURIComponent(m[1])} />;
   else if (isSales) page = path === "/" ? <SalesHome /> : <NotFound />;
@@ -88,6 +90,7 @@ function Shell() {
   else if (path === "/tasks") page = <Tasks />;
   else if (path === "/invoices") page = <Invoices />;
   else if (im) page = <InvoiceEdit key={im[1]} id={decodeURIComponent(im[1])} />;
+  else if (rm) page = <Receipt invoiceId={decodeURIComponent(rm[1])} receiptId={decodeURIComponent(rm[2])} />;
   else if (path === "/payments") page = <Payments />;
   else if (path === "/team") page = <Team />;
   else if (path === "/settings") page = <Settings />;

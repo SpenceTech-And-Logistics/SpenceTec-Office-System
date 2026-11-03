@@ -13,6 +13,11 @@ Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `set
 
 Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
 
+## Receipts, status and invoice numbers (v4.6)
+- Each invoice shows its status under INVOICE: **Unpaid**, **Partly paid**, **Paid**, **Overdue** or **Void**, and lists the payments received. Payment details are hidden once it's paid.
+- Every payment recorded gets a **receipt** (RCT-006-1, RCT-006-2…): amount in figures and words, method and reference, total paid to date and balance remaining ("Paid in full" on the last one). Download PDF, Print or Email from the receipt page.
+- **Invoice number** can be typed when creating an invoice (e.g. to enter older Word invoices) or changed later. Leave it blank for the next number. Numbers already used are refused.
+
 ## Invoice options (v4.5)
 - **Download PDF** on every invoice saves an A4 PDF named like `INV-006_SpenceTec_Invoice_Betty_Karimi.pdf` (Print is still there too).
 - **Payment** section per invoice: *Deposit + balance*, *Full payment*, or *Client chooses* (the invoice shows both options). Terms update to match. Default in Settings.
