@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { useDesk } from "../desk.jsx";
 import { Link, navigate, useLocation } from "../router.jsx";
 import { ClientSelect, Empty, Icon, InvPill, PageHead, Seg } from "../ui.jsx";
-import { kes, uid, today, daysFromNow, invTotals, invStatus, invNo, fmtDate, PAY_METHODS, fillTerms, INVOICE_TEMPLATES, FREQS, FREQ_SUFFIX, freqOf, PAY_MODES, termsFor, receiptNo, STATUS_LABEL } from "../util.js";
+import { kes, uid, today, daysFromNow, invTotals, invStatus, invNo, fmtDate, PAY_METHODS, fillTerms, INVOICE_TEMPLATES, FREQS, FREQ_SUFFIX, freqOf, PAY_MODES, termsFor, receiptNo, STATUS_LABEL, defaultDueDate } from "../util.js";
 import { downloadInvoicePdf, invoiceFileName } from "../pdf.js";
 
 const billToOf = (c) => c ? { name: c.name || "", email: c.email || "", phone: c.phone || "", address: [c.title, c.org, c.location].filter(Boolean).join(", ") } : { name: "", email: "", phone: "", address: "" };
@@ -28,7 +28,7 @@ export default function InvoiceEdit({ id }) {
   };
   const fresh = () => {
     const c = clients.find((x) => x.id === query.get("client"));
-    return { clientId: c?.id || "", issueDate: today(), dueDate: daysFromNow(14), billTo: billToOf(c), vat: false, vatRate: +(settings.vatRate || 16), discount: 0,
+    return { clientId: c?.id || "", issueDate: today(), dueDate: defaultDueDate(settings), billTo: billToOf(c), vat: false, vatRate: +(settings.vatRate || 16), discount: 0,
       receipts: [], payDetails: settings.payInstructions || "", ...fromTemplate("portfolio") };
   };
   const [tpl, setTpl] = useState("portfolio");
@@ -116,7 +116,7 @@ export default function InvoiceEdit({ id }) {
   const mail = (() => {
     const to = f.billTo?.email;
     if (!to || isNew) return "";
-    const body = `Dear ${f.billTo.name},\n\nPlease find invoice ${number} for ${kes(t.total)}${f.dueDate ? `, due on ${fmtDate(f.dueDate)}` : ""}.\n${t.mode === "deposit" && t.pct && !t.paid ? `Deposit payable now (${t.pct}%): ${kes(t.deposit)}. Balance on completion: ${kes(t.onCompletion)}.\n` : ""}${t.mode === "either" && t.pct && !t.paid ? `You can pay the full ${kes(t.total)}, or a ${t.pct}% deposit of ${kes(t.deposit)} now and ${kes(t.onCompletion)} on completion.\n` : ""}${t.paid ? `Amount paid so far: ${kes(t.paid)}. Balance: ${kes(t.balance)}.\n` : ""}${(f.payDetails || settings.payInstructions) ? `\nPayment details:\n${f.payDetails || settings.payInstructions}\n` : ""}\nThank you for your business,\n${settings.company || "SpenceTec and Logistics Limited"}`;
+    const body = `Dear ${f.billTo.name},\n\nPlease find invoice ${number} for ${kes(t.total)}${f.dueDate ? `, due on ${fmtDate(f.dueDate)}` : ", due on receipt"}.\n${t.mode === "deposit" && t.pct && !t.paid ? `Deposit payable now (${t.pct}%): ${kes(t.deposit)}. Balance on completion: ${kes(t.onCompletion)}.\n` : ""}${t.mode === "either" && t.pct && !t.paid ? `You can pay the full ${kes(t.total)}, or a ${t.pct}% deposit of ${kes(t.deposit)} now and ${kes(t.onCompletion)} on completion.\n` : ""}${t.paid ? `Amount paid so far: ${kes(t.paid)}. Balance: ${kes(t.balance)}.\n` : ""}${(f.payDetails || settings.payInstructions) ? `\nPayment details:\n${f.payDetails || settings.payInstructions}\n` : ""}\nThank you for your business,\n${settings.company || "SpenceTec and Logistics Limited"}`;
     return `mailto:${to}?subject=${encodeURIComponent(`Invoice ${number} from ${settings.company || "SpenceTec and Logistics Limited"}`)}&body=${encodeURIComponent(body)}`;
   })();
 
@@ -164,7 +164,15 @@ export default function InvoiceEdit({ id }) {
                 <small className={numberTaken ? "num-note bad" : "num-note"}>{numberTaken ? `${invNo({ number: typedNumber }, settings)} is already used` : isNew ? (typedNumber ? "You chose this number" : "Leave blank for the next number") : "Change it to fix a wrong number"}</small>
               </label>
               <label>Issue date<input type="date" value={f.issueDate} onChange={(e) => set("issueDate", e.target.value)} /></label>
-              <label>Due date<input type="date" value={f.dueDate} onChange={(e) => set("dueDate", e.target.value)} /></label>
+              <label>Due date <span className="opt-tag">optional</span>
+                <span className="due-in">
+                  <input type="date" value={f.dueDate || ""} onChange={(e) => set("dueDate", e.target.value)} aria-label="Due date" />
+                  {f.dueDate
+                    ? <button type="button" className="btn sm" onClick={() => set("dueDate", "")} title="Remove the due date">No due date</button>
+                    : <button type="button" className="btn sm" onClick={() => set("dueDate", daysFromNow(14))}>Add one</button>}
+                </span>
+                <small className="num-note">{f.dueDate ? "Shown on the invoice; it turns Overdue after this date." : "None: the invoice says payment is due on receipt."}</small>
+              </label>
             </div>
           </section>
 
@@ -295,7 +303,7 @@ export function InvoiceDoc({ inv, number, t, st, settings }) {
   const s = settings || {};
   const lines = (inv.items || []).filter((i) => (i.desc || "").trim() || +i.price);
   const company = s.company || "SpenceTec and Logistics Limited";
-  const terms = fillTerms(inv.terms ?? termsFor(t.mode, s), t.pct);
+  const terms = fillTerms(inv.terms ?? termsFor(t.mode, s), t.pct, !!inv.dueDate);
   const payDetails = inv.payDetails || s.payInstructions || "";
   const longDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "");
   const money = (n) => Math.round(+n || 0).toLocaleString("en-KE");
@@ -312,7 +320,7 @@ export function InvoiceDoc({ inv, number, t, st, settings }) {
         <dl>
           <dt>Invoice No:</dt><dd>{number}</dd>
           <dt>Date:</dt><dd>{longDate(inv.issueDate) || "—"}</dd>
-          {inv.dueDate && <><dt>Due Date:</dt><dd>{longDate(inv.dueDate)}</dd></>}
+          <dt>Due Date:</dt><dd>{inv.dueDate ? longDate(inv.dueDate) : "On receipt"}</dd>
         </dl>
       </header>
 

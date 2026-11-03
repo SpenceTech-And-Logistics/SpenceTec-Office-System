@@ -8,6 +8,7 @@ export function BillingTabs({ on }) {
   return (
     <div className="tabs" role="tablist">
       <Link to="/invoices" role="tab" aria-selected={on === "invoices"}><Icon name="invoice" size={16} />Invoices</Link>
+      <Link to="/receipts" role="tab" aria-selected={on === "receipts"}><Icon name="file" size={16} />Receipts</Link>
       <Link to="/payments" role="tab" aria-selected={on === "payments"}><Icon name="money" size={16} />Other payments</Link>
     </div>
   );

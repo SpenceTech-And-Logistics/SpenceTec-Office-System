@@ -13,6 +13,10 @@ Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `set
 
 Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
 
+## Receipts page and optional due date (v4.7)
+- **Billing → Receipts** keeps every receipt issued (newest first), with totals for this month and this year, filters (this month, last month, this year) and search by receipt number, client or M-Pesa code. Click a row to open, download or print the receipt.
+- **Due date is optional.** "No due date" on an invoice shows "Due Date: On receipt", the terms say "due on receipt of this invoice", and it never turns Overdue. Settings → *Due date on new invoices (days)*: leave empty for no due date by default.
+
 ## Receipts, status and invoice numbers (v4.6)
 - Each invoice shows its status under INVOICE: **Unpaid**, **Partly paid**, **Paid**, **Overdue** or **Void**, and lists the payments received. Payment details are hidden once it's paid.
 - Every payment recorded gets a **receipt** (RCT-006-1, RCT-006-2…): amount in figures and words, method and reference, total paid to date and balance remaining ("Paid in full" on the last one). Download PDF, Print or Email from the receipt page.

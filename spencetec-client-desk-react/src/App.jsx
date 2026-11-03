@@ -13,6 +13,7 @@ import Payments from "./pages/Payments.jsx";
 import Invoices from "./pages/Invoices.jsx";
 import InvoiceEdit from "./pages/InvoiceEdit.jsx";
 import Receipt from "./pages/Receipt.jsx";
+import Receipts from "./pages/Receipts.jsx";
 import Register from "./pages/Register.jsx";
 import SalesHome from "./pages/SalesHome.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -58,7 +59,7 @@ function Shell() {
   const active = (to) => {
     if (to === "/") return path === "/";
     if (to === "/clients") return path === "/clients" || (path.startsWith("/clients/") && path !== "/clients/new");
-    if (to === "/invoices") return path.startsWith("/invoices") || path === "/payments";
+    if (to === "/invoices") return path.startsWith("/invoices") || path === "/payments" || path === "/receipts";
     return path === to || path.startsWith(to + "/");
   };
   const addClient = () => navigate("/clients/new");
@@ -92,6 +93,7 @@ function Shell() {
   else if (im) page = <InvoiceEdit key={im[1]} id={decodeURIComponent(im[1])} />;
   else if (rm) page = <Receipt invoiceId={decodeURIComponent(rm[1])} receiptId={decodeURIComponent(rm[2])} />;
   else if (path === "/payments") page = <Payments />;
+  else if (path === "/receipts") page = <Receipts />;
   else if (path === "/team") page = <Team />;
   else if (path === "/settings") page = <Settings />;
   else if (path === "/activity") page = <Activity />;

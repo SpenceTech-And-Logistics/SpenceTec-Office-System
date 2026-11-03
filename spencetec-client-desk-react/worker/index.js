@@ -716,7 +716,7 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const DOC_TYPES = [...IMAGE_TYPES, "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
 const MAX_FILE = 1900000;
 const MAX_PHOTOS = 12;
-const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "invoicePad", "invoiceStart", "depositPct", "payMode", "terms", "vatRate", "payInstructions", "footer", "idleMinutes", "maxHours"];
+const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "invoicePad", "invoiceStart", "depositPct", "payMode", "dueDays", "terms", "vatRate", "payInstructions", "footer", "idleMinutes", "maxHours"];
 
 const ownsClient = (c, email) => c.rep === email || c.createdBy === email;
 const salesView = (c) => Object.fromEntries(Object.entries(c).filter(([k]) => SALES_VIEW.includes(k)));
