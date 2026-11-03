@@ -13,6 +13,12 @@ Tables: `users`, `login_codes`, `sessions`, `clients`, `invoices`, `files`, `set
 
 Permissions are enforced in the Worker, not just hidden in the page. Existing v3 "members" become secretaries when you run the migration.
 
+## Invoice options (v4.5)
+- **Download PDF** on every invoice saves an A4 PDF named like `INV-006_SpenceTec_Invoice_Betty_Karimi.pdf` (Print is still there too).
+- **Payment** section per invoice: *Deposit + balance*, *Full payment*, or *Client chooses* (the invoice shows both options). Terms update to match. Default in Settings.
+- **Payment details** can be changed per invoice (prefilled from Settings; "Use the default details" resets them).
+- Each line is **One-off**, **Monthly** or **Yearly**. Monthly and yearly lines show "/mo" / "/yr" and are listed under the total as billed separately. "+ Yearly maintenance" adds one in a click; a **Yearly maintenance** template bills a year's maintenance now.
+
 ## Invoice template (v4.4)
 Invoices now match SpenceTec's own design: the logo across the top, a Bill from / Bill to panel, a navy line table, a fee / deposit / balance summary, payment details, payment terms and a closing line.
 - **Start from** a template when creating an invoice: Web portfolio page, Multi-page website, Monthly updates only, or Blank.

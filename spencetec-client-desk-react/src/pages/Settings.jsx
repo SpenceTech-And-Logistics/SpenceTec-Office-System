@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useDesk } from "../desk.jsx";
 import { Empty, PageHead } from "../ui.jsx";
-import { DEFAULT_TERMS, fillTerms, invNo } from "../util.js";
+import { DEFAULT_TERMS, fillTerms, invNo, PAY_MODES } from "../util.js";
 
 const FIELDS = [
   ["company", "Company name", "SpenceTec and Logistics Limited"],
@@ -48,12 +48,13 @@ export default function Settings() {
           </div>
           <p className="small">Next invoice looks like <b>{invNo({ number: Math.max(+f.invoiceStart || 1, 1) }, f)}</b> (or the number after your latest invoice, whichever is higher).</p>
           <div className="fields">
+            <label>Default payment option<select value={f.payMode || "deposit"} onChange={set("payMode")}>{PAY_MODES.map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></label>
             <label>Default deposit (%)<input type="number" min="0" max="100" value={f.depositPct ?? 75} onChange={set("depositPct")} /></label>
             <label>Default VAT rate (%)<input type="number" min="0" max="100" value={f.vatRate ?? 16} onChange={set("vatRate")} /></label>
           </div>
-          <label>Payment details<textarea rows="5" value={f.payInstructions || ""} onChange={set("payInstructions")}
+          <label>Default payment details (each invoice can change its own)<textarea rows="5" value={f.payInstructions || ""} onChange={set("payInstructions")}
             placeholder={"M-Pesa: 07…\nBank: …\nAccount name: …\nAccount / reference number: …"} /></label>
-          <label>Default payment terms<textarea rows="4" value={f.terms ?? ""} placeholder={DEFAULT_TERMS} onChange={set("terms")} /></label>
+          <label>Default payment terms (deposit + balance)<textarea rows="4" value={f.terms ?? ""} placeholder={DEFAULT_TERMS} onChange={set("terms")} /></label>
           <p className="small">Preview: {fillTerms(f.terms || DEFAULT_TERMS, +f.depositPct || 75)}</p>
           <label>Closing line<input value={f.footer || ""} onChange={set("footer")} placeholder="Thank you for your business." /></label>
           <button className="btn primary" disabled={busy}>{busy ? "Saving…" : "Save settings"}</button>

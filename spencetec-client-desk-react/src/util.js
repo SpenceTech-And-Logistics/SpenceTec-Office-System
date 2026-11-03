@@ -75,19 +75,29 @@ export const deadlineOf = (c) => c.deadline || "";
 export const LINK_TYPES = ["Website", "Facebook", "X (Twitter)", "Instagram", "LinkedIn", "TikTok", "YouTube", "Wikipedia", "News article", "Other"];
 
 /* ---------- invoices ---------- */
+// How often a line is charged. Monthly and yearly lines are shown on the invoice but billed separately.
+export const FREQS = [["once", "One-off"], ["monthly", "Monthly"], ["yearly", "Yearly"]];
+export const freqOf = (i) => (i.freq === "monthly" || i.freq === "yearly" ? i.freq : i.monthly ? "monthly" : "once");
+export const FREQ_SUFFIX = { once: "", monthly: "/mo", yearly: "/yr" };
+// payMode: "deposit" (deposit now, balance on completion), "full" (whole amount), "either" (client chooses)
+export const PAY_MODES = [["deposit", "Deposit + balance"], ["full", "Full payment"], ["either", "Client chooses"]];
+export const payModeOf = (inv) => (["deposit", "full", "either"].includes(inv.payMode) ? inv.payMode : +inv.depositPct > 0 ? "deposit" : "full");
+
 export function invTotals(inv) {
-  // Monthly lines are shown on the invoice but billed separately, so they're not in the total.
   const lineAmt = (i) => (+i.qty || 0) * (+i.price || 0);
-  const sub = (inv.items || []).filter((i) => !i.monthly).reduce((a, i) => a + lineAmt(i), 0);
-  const monthly = (inv.items || []).filter((i) => i.monthly).reduce((a, i) => a + lineAmt(i), 0);
+  const items = inv.items || [];
+  const sub = items.filter((i) => freqOf(i) === "once").reduce((a, i) => a + lineAmt(i), 0);
+  const monthly = items.filter((i) => freqOf(i) === "monthly").reduce((a, i) => a + lineAmt(i), 0);
+  const yearly = items.filter((i) => freqOf(i) === "yearly").reduce((a, i) => a + lineAmt(i), 0);
   const disc = Math.min(+inv.discount || 0, sub);
   const net = sub - disc;
   const vat = inv.vat ? Math.round(net * (+inv.vatRate || 0)) / 100 : 0;
   const total = net + vat;
   const paidAmt = (inv.receipts || []).reduce((a, p) => a + (+p.amount || 0), 0);
-  const pct = Math.min(100, Math.max(0, +inv.depositPct || 0));
+  const mode = payModeOf(inv);
+  const pct = mode === "full" ? 0 : Math.min(100, Math.max(0, +inv.depositPct || 0));
   const deposit = pct ? Math.round((total * pct) / 100) : 0;
-  return { sub, disc, net, vat, total, monthly, pct, deposit, onCompletion: total - deposit, paid: paidAmt, balance: Math.max(total - paidAmt, 0) };
+  return { sub, disc, net, vat, total, monthly, yearly, mode, pct, deposit, onCompletion: total - deposit, paid: paidAmt, balance: Math.max(total - paidAmt, 0) };
 }
 export function invStatus(inv) {
   if (inv.status === "void") return "void";
@@ -105,6 +115,11 @@ export const INV_STATUS = {
 export const invNo = (inv, settings) => (settings?.invoicePrefix ?? "INV-") + String(inv.number || 0).padStart(+(settings?.invoicePad || 3), "0");
 // "{deposit}" and "{balance}" in payment terms become the percentages.
 export const NO_DEPOSIT_TERMS = "Payment is due in full by the due date shown above.";
+export const EITHER_TERMS = "You may pay the full amount by the due date, or pay a {deposit}% deposit before work begins and the remaining {balance}% on completion.";
+export const RECURRING_TERMS = "Monthly updates and yearly maintenance are billed separately at the agreed rates.";
+// Default terms for each payment option (the deposit wording can be changed in Settings).
+export const termsFor = (mode, settings) =>
+  mode === "full" ? NO_DEPOSIT_TERMS : mode === "either" ? EITHER_TERMS : settings?.terms || DEFAULT_TERMS;
 export const fillTerms = (text, pct) => {
   const t = String(text || "");
   // Deposit wording makes no sense without a deposit, so fall back to plain terms.
@@ -115,18 +130,21 @@ export const DEFAULT_TERMS = "A {deposit}% deposit of the agreed fee is payable 
 
 /* Starting points for new invoices, based on SpenceTec's own invoices. Prices are left for you to fill in. */
 export const INVOICE_TEMPLATES = [
-  { key: "portfolio", name: "Web portfolio page", depositPct: 75,
-    items: [{ desc: "Preparation of a web portfolio page, as agreed", qty: 1, price: "" },
-            { desc: "Monthly website updates (additional recurring charge)", qty: 1, price: 10000, monthly: true }],
+  { key: "portfolio", name: "Web portfolio page", payMode: "deposit", depositPct: 75,
+    items: [{ desc: "Preparation of a web portfolio page, as agreed", qty: 1, price: "", freq: "once" },
+            { desc: "Monthly website updates (additional recurring charge)", qty: 1, price: 10000, freq: "monthly" }],
     notes: "Monthly updates are charged separately from the web portfolio preparation fee." },
-  { key: "multipage", name: "Multi-page website", depositPct: 75,
-    items: [{ desc: "Design and build of a multi-page website, as agreed", qty: 1, price: "" },
-            { desc: "Domain and hosting, first year", qty: 1, price: "" },
-            { desc: "Monthly website updates (additional recurring charge)", qty: 1, price: 10000, monthly: true }],
-    notes: "Monthly updates are charged separately from the website fee." },
-  { key: "updates", name: "Monthly updates only", depositPct: 0,
-    items: [{ desc: "Monthly website updates", qty: 1, price: 10000 }], notes: "" },
-  { key: "blank", name: "Blank invoice", depositPct: 0, items: [{ desc: "", qty: 1, price: "" }], notes: "" },
+  { key: "multipage", name: "Multi-page website", payMode: "deposit", depositPct: 75,
+    items: [{ desc: "Design and build of a multi-page website, as agreed", qty: 1, price: "", freq: "once" },
+            { desc: "Domain and hosting, first year", qty: 1, price: "", freq: "once" },
+            { desc: "Yearly maintenance: hosting, domain renewal and support", qty: 1, price: "", freq: "yearly" },
+            { desc: "Monthly website updates (additional recurring charge)", qty: 1, price: 10000, freq: "monthly" }],
+    notes: "Yearly maintenance and monthly updates are charged separately from the website fee." },
+  { key: "yearly", name: "Yearly maintenance", payMode: "full", depositPct: 0,
+    items: [{ desc: "Yearly website maintenance: hosting, domain renewal and support", qty: 1, price: "", freq: "once" }], notes: "" },
+  { key: "updates", name: "Monthly updates", payMode: "full", depositPct: 0,
+    items: [{ desc: "Monthly website updates", qty: 1, price: 10000, freq: "once" }], notes: "" },
+  { key: "blank", name: "Blank invoice", payMode: "full", depositPct: 0, items: [{ desc: "", qty: 1, price: "", freq: "once" }], notes: "" },
 ];
 export const invOwed = (invoices) => invoices.filter((i) => ["sent", "partial", "overdue"].includes(invStatus(i))).reduce((a, i) => a + invTotals(i).balance, 0);
 export const PAY_METHODS = ["M-Pesa", "Bank transfer", "Cash", "Cheque", "Card"];

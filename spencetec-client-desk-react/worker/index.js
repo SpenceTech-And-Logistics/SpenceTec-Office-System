@@ -698,7 +698,7 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const DOC_TYPES = [...IMAGE_TYPES, "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
 const MAX_FILE = 1900000;
 const MAX_PHOTOS = 12;
-const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "invoicePad", "invoiceStart", "depositPct", "terms", "vatRate", "payInstructions", "footer", "idleMinutes", "maxHours"];
+const SETTINGS = ["company", "address", "email", "phone", "kraPin", "invoicePrefix", "invoicePad", "invoiceStart", "depositPct", "payMode", "terms", "vatRate", "payInstructions", "footer", "idleMinutes", "maxHours"];
 
 const ownsClient = (c, email) => c.rep === email || c.createdBy === email;
 const salesView = (c) => Object.fromEntries(Object.entries(c).filter(([k]) => SALES_VIEW.includes(k)));
@@ -719,8 +719,14 @@ function cleanInvoice(b) {
     dueDate: date(b.dueDate),
     billTo: { name: str(b.billTo?.name, 120), email: str(b.billTo?.email, 120), phone: str(b.billTo?.phone, 40), address: str(b.billTo?.address, 300) },
     // monthly = recurring charge shown on the invoice but billed separately (not in the total).
-    items: (Array.isArray(b.items) ? b.items : []).slice(0, 50).map((i) => ({ id: str(i.id, 20), desc: str(i.desc, 300), qty: num(i.qty), price: num(i.price), monthly: !!i.monthly })),
+    // freq: once | monthly | yearly. Monthly and yearly lines are billed separately (not in the total).
+    items: (Array.isArray(b.items) ? b.items : []).slice(0, 50).map((i) => {
+      const freq = ["monthly", "yearly"].includes(i.freq) ? i.freq : i.monthly ? "monthly" : "once";
+      return { id: str(i.id, 20), desc: str(i.desc, 300), qty: num(i.qty), price: num(i.price), freq };
+    }),
+    payMode: ["deposit", "full", "either"].includes(b.payMode) ? b.payMode : num(b.depositPct) > 0 ? "deposit" : "full",
     depositPct: Math.min(100, Math.max(0, num(b.depositPct ?? 0))),
+    payDetails: str(b.payDetails, 2000),   // empty = use the payment details from Settings
     terms: str(b.terms, 2000),
     vat: !!b.vat,
     vatRate: num(b.vatRate ?? 16),
